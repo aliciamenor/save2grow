@@ -52,3 +52,18 @@ even as config.
 **What would invalidate it**: a second real user (Fase 1) turns this from "one owner id" into
 "a list of allowed ids" — at that point this single-value env var becomes a table lookup, not a
 bigger env var.
+
+## 2026-10-25 · [001-core-loop] telegram-webhook deployed with verify_jwt = false
+
+**What is decided**: `supabase/config.toml` sets `verify_jwt = false` for the `telegram-webhook`
+function only. `daily-push` keeps the default (JWT required).
+
+**Why**: Telegram's servers call the webhook directly with no Supabase auth header at all —
+Supabase's default JWT verification silently rejected every incoming update before the code ran,
+so the bot never replied and nothing was logged as an error. `daily-push` is only ever called by
+our own GitHub Actions workflow using the service-role key, which already is a valid JWT, so it
+keeps the safer default.
+
+**What would invalidate it**: moving webhook verification to a shared secret in the URL path or a
+Telegram-specific signature check (Telegram doesn't sign webhook payloads today) instead of
+relying on `verify_jwt = false` wide open to any caller.

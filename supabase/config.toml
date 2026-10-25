@@ -1,0 +1,8 @@
+project_id = "ganwkykfudvruvdlxlbm"
+
+[functions.telegram-webhook]
+# Telegram's servers call this directly with no Supabase JWT — without this, Supabase rejects
+# every incoming update before our code ever sees it (silent 401, no reply, no error visible to
+# the bot owner). daily-push is called by our own GitHub Actions workflow with the service-role
+# key, which IS a valid JWT, so it keeps the default verification.
+verify_jwt = false
