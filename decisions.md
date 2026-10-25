@@ -36,3 +36,19 @@ year-round without a second, DST-aware scheduler component.
 **What would invalidate it**: moving the push off GitHub Actions cron entirely (e.g. to a
 Supabase pg_cron job, which can be told a named timezone directly) would make the double-fire
 gate unnecessary.
+
+## 2026-10-25 · [001-core-loop] Owner whitelist enforced via OWNER_TELEGRAM_ID env var
+
+**What is decided**: `telegram-webhook/index.ts` reads `OWNER_TELEGRAM_ID` from the environment
+and silently ignores (returns `200 ok`, no processing) any update whose sender id doesn't match
+it. Every sender id is still logged regardless of the match, filter active or not.
+
+**Why**: the spec's stopping condition was honored as written — ship logging-only, ask Alis to
+confirm her id, enforce in a fast-follow. She confirmed it the same day. The id isn't
+password-grade sensitive, but it's a fixed identifier tied to her real account in a public repo's
+permanent history, so it lives only as the `OWNER_TELEGRAM_ID` secret — never written in a commit,
+even as config.
+
+**What would invalidate it**: a second real user (Fase 1) turns this from "one owner id" into
+"a list of allowed ids" — at that point this single-value env var becomes a table lookup, not a
+bigger env var.

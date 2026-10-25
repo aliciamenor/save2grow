@@ -50,13 +50,15 @@
 5. Tapping a triage button updates `items.status` to `deleted` / `resource` / stays `pending`.
    Nothing caps how many items can be `pending` at once — the push is a nudge, never a block.
 
-### Owner whitelist — explicitly not enforced yet
+### Owner whitelist — enforced
 
-Alis's Telegram numeric user ID was not confirmed when this was built (stopping condition in
-`specs/done/001-core-loop.md`). `telegram-webhook/index.ts` logs the sender's numeric id on every
-incoming message and callback (`console.log("telegram sender id: ...")`, visible via `supabase
-functions logs telegram-webhook`), and nothing filters on it. Turning on the filter is a
-fast-follow once the id is confirmed — see `learnings/001-smoke-test.md`.
+Alis confirmed her Telegram numeric user ID (2026-10-25). `telegram-webhook/index.ts` reads
+`OWNER_TELEGRAM_ID` from the environment and silently drops (`200 ok`, no processing) any update
+whose sender id doesn't match. Every sender id is still logged regardless
+(`console.log("telegram sender id: ...")`, visible via `supabase functions logs
+telegram-webhook`), so a future second user shows up before anyone adds them to an allowlist.
+Needs a 5th secret/env var, `OWNER_TELEGRAM_ID`, set alongside the other four before this is
+useful live — see the deploy steps below.
 
 ### Tests
 
@@ -82,4 +84,5 @@ curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=<SUPABASE_U
 The four secrets (`TELEGRAM_BOT_TOKEN`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
 `SUPABASE_SERVICE_ROLE_KEY`) already exist as GitHub repository secrets; the Edge Functions read
 `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `TELEGRAM_BOT_TOKEN` from their own Supabase
-function env (set separately via `supabase secrets set`, mirroring the same values).
+function env (set separately via `supabase secrets set`, mirroring the same values) — plus a 5th,
+`OWNER_TELEGRAM_ID` (set only as a secret — not written here), for the whitelist above.

@@ -4,10 +4,10 @@
 // tested under Node without a Deno runtime or live credentials. This file only wires env vars
 // and the HTTP boundary.
 //
-// Owner whitelist (stopping condition in specs/done/001-core-loop.md): Alis's Telegram numeric user
-// ID is not confirmed yet. This does NOT invent or enforce one — it logs the sender's numeric ID
-// on every incoming message/callback so the filter can be turned on in a fast-follow commit once
-// she confirms it.
+// Owner whitelist (stopping condition in specs/done/001-core-loop.md): Alis confirmed her
+// Telegram numeric user ID (2026-10-25). Fast-follow: enforced below via OWNER_TELEGRAM_ID.
+// Every sender id is still logged regardless, so a future second user is visible before anyone
+// adds them to the allowlist.
 
 // @ts-ignore - Deno global, not a Node type.
 import { handleUpdate } from "../_shared/webhook-handler.js";
@@ -22,6 +22,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 // @ts-ignore
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN");
+// @ts-ignore
+const OWNER_TELEGRAM_ID = Deno.env.get("OWNER_TELEGRAM_ID");
 
 // @ts-ignore - Deno global.
 Deno.serve(async (req: Request) => {
@@ -40,10 +42,16 @@ Deno.serve(async (req: Request) => {
   const telegram = makeTelegram(TELEGRAM_BOT_TOKEN);
 
   const onSenderId = (id: number | undefined) => {
-    // Visible in `supabase functions logs telegram-webhook`. Not enforced as a filter yet —
-    // see the stopping condition in specs/done/001-core-loop.md.
+    // Always logged, filter or no filter — visible in `supabase functions logs telegram-webhook`.
     console.log(`telegram sender id: ${id}`);
   };
+
+  // @ts-ignore - loosely-typed update payload, same shape used in _shared/webhook-handler.js.
+  const senderId = update?.message?.from?.id ?? update?.callback_query?.from?.id;
+  if (OWNER_TELEGRAM_ID && String(senderId) !== String(OWNER_TELEGRAM_ID)) {
+    console.log(`ignored sender id ${senderId}: not the owner`);
+    return new Response("ok");
+  }
 
   try {
     await handleUpdate(update, { db, telegram, onSenderId });
