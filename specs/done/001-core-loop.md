@@ -1,5 +1,5 @@
 ---
-status: pendiente
+status: implementada
 depends_on: []
 ---
 
@@ -76,6 +76,26 @@ Newborn repo (`b5f52a8`, "the repo is born"). No code exists yet.
   can be turned on in a fast-follow commit.
 - Any ambiguity between criteria 4 and 5 (e.g. what happens to an item mid-push if it's triaged by
   Alis before the push logic reads it) stops and asks rather than guessing a resolution order.
+
+## Evidence (filled in by the implementing agent)
+
+- Criteria 1, 2, 3, 5: `tests/webhook-handler.test.js` — 10/10 passing, run via
+  `evals/run.sh:14-21` → `node --test`. `supabase/functions/_shared/webhook-handler.js` is the
+  code under test.
+- Criterion 4: `tests/push-handler.test.js` — oldest-3-per-objective selection and the 3 triage
+  buttons asserted in `tests/push-handler.test.js:7-34`; code in
+  `supabase/functions/_shared/push-handler.js`.
+- Criterion 6: `evals/run.sh:23-29` — `grep -rE "anthropic|openai|@anthropic-ai"
+  supabase/functions src` returns no matches. Confirmed by running `evals/run.sh`:
+  ```
+  PASS 001.1-5 unit tests (capture, selection, new objective, daily push, triage)
+  PASS 001.6 no AI/LLM import in supabase/functions or src
+  2 pass · 0 fail
+  ```
+- Criterion 7: not run by this agent — needs a live bot token and Alis's own Telegram account.
+  Checklist in `learnings/001-smoke-test.md`, to be filled in by Alis after deploy. This is also
+  where the open stopping condition lives (Telegram user ID not yet confirmed → whitelist not
+  enforced, only logged).
 
 ## Effects that escape the system
 

@@ -1,0 +1,37 @@
+name: daily-push
+
+# Spec 001, criterion 4 — DECIDED by Alis (Gate 1, 2026-10-25): push at 08:00 Europe/Madrid.
+# GitHub Actions cron is UTC-only and Europe/Madrid shifts with DST (CET = UTC+1, CEST = UTC+2),
+# so this fires at both candidate UTC hours and gates the actual call on the real Madrid-local
+# hour computed at run time, instead of hardcoding one UTC offset that would drift twice a year.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 08:00 CEST (summer)
+    - cron: "0 7 * * *" # 08:00 CET (winter)
+  workflow_dispatch: {}
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on 08:00 Europe/Madrid local time
+        id: gate
+        run: |
+          hour="$(TZ=Europe/Madrid date +%H)"
+          if [ "$hour" = "08" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Call the daily-push Edge Function
+        if: steps.gate.outputs.run == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          curl -sS -X POST "$SUPABASE_URL/functions/v1/daily-push" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            --fail-with-body

@@ -1,0 +1,9 @@
+{
+  "name": "save2grow",
+  "private": true,
+  "type": "module",
+  "description": "Save2Grow Fase 0 — capture, prioritized push, exit triage (spec 001).",
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}
