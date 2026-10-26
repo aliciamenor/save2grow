@@ -3,6 +3,7 @@
 
 export function makeTelegram(token) {
   const base = `https://api.telegram.org/bot${token}`;
+  const fileBase = `https://api.telegram.org/file/bot${token}`;
 
   async function call(method, body) {
     const res = await fetch(`${base}/${method}`, {
@@ -28,10 +29,31 @@ export function makeTelegram(token) {
       return call("sendMessage", body);
     },
 
+    // Criterion 3: the daily push sends image items as a photo, not a text link.
+    async sendPhoto(chatId, photoUrl, replyMarkup) {
+      const body = { chat_id: chatId, photo: photoUrl };
+      if (replyMarkup) body.reply_markup = replyMarkup;
+      return call("sendPhoto", body);
+    },
+
     async answerCallbackQuery(callbackQueryId, text) {
       const body = { callback_query_id: callbackQueryId };
       if (text) body.text = text;
       return call("answerCallbackQuery", body);
+    },
+
+    // Criterion 2: resolve the file_path for a photo's file_id, so it can be downloaded.
+    async getFile(fileId) {
+      const result = await call("getFile", { file_id: fileId });
+      return result.result;
+    },
+
+    // Criterion 2: download the actual bytes from Telegram's file endpoint.
+    async downloadFile(filePath) {
+      const res = await fetch(`${fileBase}/${filePath}`);
+      if (!res.ok) throw new Error(`download file failed: ${res.status}`);
+      const buf = await res.arrayBuffer();
+      return new Uint8Array(buf);
     },
   };
 }

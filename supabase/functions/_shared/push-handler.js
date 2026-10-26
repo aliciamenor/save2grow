@@ -1,7 +1,8 @@
-// Daily push, spec 001 criterion 4: a small prioritized set per objective, oldest first, capped.
-// No AI/LLM call anywhere in this file (criterion 6).
+// Daily push, spec 002 criterion 3: a small prioritized set, oldest first, capped — no longer
+// grouped by objective (spec 001's criterion 4 behavior, since objective is out of scope here).
+// No AI/LLM call anywhere in this file (criterion 5).
 
-const DEFAULT_CAP_PER_OBJECTIVE = 3;
+const DEFAULT_CAP = 3;
 
 function triageKeyboard(itemId) {
   return {
@@ -15,20 +16,17 @@ function triageKeyboard(itemId) {
   };
 }
 
-export async function buildDailyPush(db, { capPerObjective = DEFAULT_CAP_PER_OBJECTIVE } = {}) {
-  const objectives = await db.listAllObjectives();
+export async function buildDailyPush(db, { cap = DEFAULT_CAP } = {}) {
+  const items = await db.getPendingItems(cap);
   const sends = [];
 
-  for (const objective of objectives) {
-    const items = await db.getPendingItemsByObjective(objective.id, capPerObjective);
-    for (const item of items) {
-      sends.push({
-        item,
-        objective,
-        chat_id: item.chat_id,
-        text: `[${objective.name}] ${item.link}`,
-        reply_markup: triageKeyboard(item.id),
-      });
+  for (const item of items) {
+    const reply_markup = triageKeyboard(item.id);
+    if (item.image_path) {
+      const photoUrl = await db.getSignedUrl(item.image_path);
+      sends.push({ item, chat_id: item.chat_id, kind: "photo", photo: photoUrl, reply_markup });
+    } else {
+      sends.push({ item, chat_id: item.chat_id, kind: "text", text: item.link, reply_markup });
     }
   }
 
@@ -38,7 +36,11 @@ export async function buildDailyPush(db, { capPerObjective = DEFAULT_CAP_PER_OBJ
 export async function runDailyPush(db, telegram, opts) {
   const sends = await buildDailyPush(db, opts);
   for (const send of sends) {
-    await telegram.sendMessage(send.chat_id, send.text, send.reply_markup);
+    if (send.kind === "photo") {
+      await telegram.sendPhoto(send.chat_id, send.photo, send.reply_markup);
+    } else {
+      await telegram.sendMessage(send.chat_id, send.text, send.reply_markup);
+    }
   }
   return sends;
 }

@@ -67,3 +67,56 @@ keeps the safer default.
 **What would invalidate it**: moving webhook verification to a shared secret in the URL path or a
 Telegram-specific signature check (Telegram doesn't sign webhook payloads today) instead of
 relying on `verify_jwt = false` wide open to any caller.
+
+## 2026-10-26 · [002-simplified-capture] `objective_id`, `objectives`, `captures`, `pending_actions` dropped, not left unused
+
+**What is decided**: `supabase/migrations/0002_simplified_capture.sql` drops the `objective_id`
+column from `items`, and drops the `objectives`, `captures`, and `pending_actions` tables
+outright, rather than leaving them nullable/unused. `items.link` becomes nullable and
+`items.image_path` is added, with a check constraint requiring at least one of the two.
+
+**Why**: the spec's delegated criterion was "whichever makes Fase 1's eventual migration cleanest
+to write and leaves the live schema honest". A nullable, never-set `objective_id` or an
+unreferenced `pending_actions` table would look live without being written to by anything in
+this scope — exactly what criterion 6 rules out. Dropping them means Fase 1 writes one clean
+migration (`create table objectives…`, `alter table items add column objective_id…`) against a
+schema that has no half-wired leftovers to reconcile with, instead of untangling a column that
+spent a release silently unused. `captures` existed only to stage a link between the removed
+prompt and the removed selection step; with direct save there is no staging step left, so it goes
+too, even though the spec's text names only `objective_id`/`objectives`/`pending_actions`
+explicitly.
+
+**What would invalidate it**: if Fase 1's objective-selection UI turns out to need to recover any
+data that lived only in these tables (none is expected — they held in-flight staging state, never
+historical record) the migration history (`0001_init.sql`) still has the original shape for
+reference.
+
+## 2026-10-26 · [002-simplified-capture] Captured images live in a private Supabase Storage bucket, read only via signed URL
+
+**What is decided**: `supabase/migrations/0002_simplified_capture.sql` creates the
+`item-images` bucket with `public = false`. `_shared/db.js#uploadImage` writes to it with the
+service-role key; `_shared/db.js#getSignedUrl` is the only way anything in this codebase reads an
+image back, and the daily push uses it to hand Telegram a usable URL (`_shared/push-handler.js`).
+
+**Why**: the spec's delegated criterion was to default to the least exposure, since this repo is
+public and spec 003 is what adds the first real auth — a public bucket would mean anyone who
+guessed or scraped a storage path could read Alis's captured photos with no gate at all, for
+however long the gap before spec 003 lasts.
+
+**What would invalidate it**: spec 003 landing real auth in front of a browsing UI that needs to
+render many images at once — at that point, signed URLs with a short expiry might be replaced by
+a thin authenticated proxy route, but the bucket itself should stay private either way.
+
+## 2026-10-26 · [002-simplified-capture] Confirmation reply is a single plain "Guardado.", no system jargon
+
+**What is decided**: both a saved link and a saved photo get the exact same reply text,
+`"Guardado."`, with no inline keyboard and no mention of "objetivo", "captura", "item" or any
+other internal name.
+
+**Why**: the spec's delegated criterion ruled out internal vocabulary leaking into what the bot
+says back to Alis. A single fixed string for both capture kinds also keeps the confirmation from
+silently drifting into two different voices as photo support was added alongside links.
+
+**What would invalidate it**: Fase 1 reintroducing a reason to distinguish the two in the reply
+(e.g. "Guardado como imagen." if an operator needs to tell at a glance which kind was saved
+without opening Supabase) — nothing in this spec's scope needs that distinction yet.

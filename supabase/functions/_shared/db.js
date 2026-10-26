@@ -1,11 +1,14 @@
-// Thin fetch-based wrapper over Supabase's PostgREST API. No @supabase/supabase-js dependency:
-// keeps the stack to fetch + Deno/Node built-ins, nothing more (spec 001, delegated decision on
-// runtime — fewest moving parts).
+// Thin fetch-based wrapper over Supabase's PostgREST + Storage APIs. No @supabase/supabase-js
+// dependency: keeps the stack to fetch + Deno/Node built-ins, nothing more (spec 001, delegated
+// decision on runtime — fewest moving parts; spec 002 keeps the same pattern for Storage).
 //
 // Runs identically under Deno (Edge Functions) and Node (tests), since it only uses global fetch.
 
+const IMAGE_BUCKET = "item-images";
+
 export function makeDb({ url, key }) {
   const base = `${url}/rest/v1`;
+  const storageBase = `${url}/storage/v1`;
   const headers = {
     apikey: key,
     Authorization: `Bearer ${key}`,
@@ -39,69 +42,51 @@ export function makeDb({ url, key }) {
     return res.json();
   }
 
-  async function del(path) {
-    const res = await fetch(`${base}/${path}`, { method: "DELETE", headers });
-    if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status} ${await res.text()}`);
-  }
-
   return {
-    async listObjectives(chatId) {
-      return get(`objectives?chat_id=eq.${chatId}&order=created_at.asc`);
+    async insertItem({ chat_id, link = null, image_path = null, status = "pending" }) {
+      return post("items", { chat_id, link, image_path, status });
     },
 
-    async listAllObjectives() {
-      return get(`objectives?order=created_at.asc`);
-    },
-
-    async insertObjective(chatId, name) {
-      return post("objectives", { chat_id: chatId, name });
-    },
-
-    async insertCapture(chatId, link) {
-      return post("captures", { chat_id: chatId, link });
-    },
-
-    async getCapture(id) {
-      const rows = await get(`captures?id=eq.${id}`);
-      return rows[0];
-    },
-
-    async deleteCapture(id) {
-      return del(`captures?id=eq.${id}`);
-    },
-
-    async insertItem({ objective_id, chat_id, link, status = "pending" }) {
-      return post("items", { objective_id, chat_id, link, status });
-    },
-
-    async getPendingItemsByObjective(objectiveId, limit) {
-      return get(
-        `items?objective_id=eq.${objectiveId}&status=eq.pending&order=created_at.asc&limit=${limit}`
-      );
+    // Criterion 3: oldest 3 pending items overall — objective is gone from this scope, so there
+    // is no per-objective grouping left to select within.
+    async getPendingItems(limit) {
+      return get(`items?status=eq.pending&order=created_at.asc&limit=${limit}`);
     },
 
     async updateItemStatus(itemId, status) {
       return patch(`items?id=eq.${itemId}`, { status });
     },
 
-    async setPendingAction(chatId, captureId) {
-      // One pending "awaiting objective name" per chat — upsert via delete + insert, since
-      // PostgREST upsert needs a Prefer header variant; simplest here is overwrite.
-      await del(`pending_actions?chat_id=eq.${chatId}`).catch(() => {});
-      return post("pending_actions", {
-        chat_id: chatId,
-        kind: "awaiting_objective_name",
-        capture_id: captureId,
+    // Criterion 2: upload the downloaded photo bytes to the private `item-images` bucket.
+    async uploadImage(path, bytes, contentType) {
+      const res = await fetch(`${storageBase}/object/${IMAGE_BUCKET}/${path}`, {
+        method: "POST",
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${key}`,
+          "Content-Type": contentType || "application/octet-stream",
+        },
+        body: bytes,
       });
+      if (!res.ok) {
+        throw new Error(`storage upload ${path} failed: ${res.status} ${await res.text()}`);
+      }
+      return { path };
     },
 
-    async getPendingAction(chatId) {
-      const rows = await get(`pending_actions?chat_id=eq.${chatId}`);
-      return rows[0] || null;
-    },
-
-    async deletePendingAction(chatId) {
-      return del(`pending_actions?chat_id=eq.${chatId}`);
+    // Used by the daily push to hand Telegram a usable URL for a private-bucket image, without
+    // ever making the bucket itself public.
+    async getSignedUrl(path, expiresIn = 3600) {
+      const res = await fetch(`${storageBase}/object/sign/${IMAGE_BUCKET}/${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ expiresIn }),
+      });
+      if (!res.ok) {
+        throw new Error(`sign url ${path} failed: ${res.status} ${await res.text()}`);
+      }
+      const { signedURL } = await res.json();
+      return `${storageBase}${signedURL}`;
     },
   };
 }
