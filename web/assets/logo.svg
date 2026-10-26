@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -20 100 120" role="img" aria-label="Save2Grow logo: a social-media save icon with a two-leaf sprout growing from the top">
+  <path d="M26,20 a4,4 0 0 1 4,-4 h40 a4,4 0 0 1 4,4 v62 l-24,-17 l-24,17 Z" fill="none" stroke="#42767f" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
+  <rect x="47.5" y="2" width="5" height="16" rx="2" fill="#2f5860"/>
+  <path d="M50,10 C36,10 28,0 30,-14 C44,-12 50,-2 50,10 Z" fill="#10b981"/>
+  <path d="M50,10 C64,10 72,0 70,-14 C56,-12 50,-2 50,10 Z" fill="#10b981"/>
+  <path d="M50,8 C42,2 36,-5 33,-12" fill="none" stroke="#0a7a56" stroke-width="1.2" stroke-linecap="round"/>
+  <path d="M50,8 C58,2 64,-5 67,-12" fill="none" stroke="#0a7a56" stroke-width="1.2" stroke-linecap="round"/>
+</svg>
