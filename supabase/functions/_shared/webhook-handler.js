@@ -1,8 +1,13 @@
-// Core logic of the Telegram webhook, spec 001 criteria 1, 2, 3, 5.
+// Core logic of the Telegram webhook, spec 002 criteria 1, 2, 4.
 //
 // Pure-ish: takes its collaborators (db, telegram, onSenderId) as a `ctx` object instead of
 // importing them, so unit tests can hand it fakes with no network and no real Supabase/Telegram.
-// No AI/LLM call anywhere in this file (criterion 6).
+// No AI/LLM call anywhere in this file (criterion 5).
+//
+// Spec 002 rolls back spec 001's objective-selection UI: no inline buttons, no
+// "+ nuevo objetivo" flow, no `pending_actions` lookup. A link or a photo saves directly, with
+// a short confirmation and nothing else (criterion 1, 2, 6). Objective selection returns in
+// Fase 1, rebuilt against this simplified schema.
 
 const URL_RE = /https?:\/\/\S+/i;
 
@@ -11,6 +16,8 @@ const TRIAGE_STATUS_BY_ACTION = {
   recurso: "resource",
   pendiente: "pending",
 };
+
+const CONFIRMATION_TEXT = "Guardado.";
 
 export async function handleUpdate(update, ctx) {
   const { db, telegram, onSenderId } = ctx;
@@ -30,36 +37,26 @@ async function handleMessage(message, { db, telegram, onSenderId }) {
   const chatId = message.chat.id;
   if (onSenderId) onSenderId(message.from && message.from.id);
 
-  const text = (message.text || "").trim();
-
-  // Criterion 3: the next message after "+ nuevo objetivo" names the new objective.
-  const pendingAction = await db.getPendingAction(chatId);
-  if (pendingAction && pendingAction.kind === "awaiting_objective_name") {
-    const name = text;
-    const objective = await db.insertObjective(chatId, name);
-    const capture = await db.getCapture(pendingAction.capture_id);
-    const item = await db.insertItem({
-      objective_id: objective.id,
-      chat_id: chatId,
-      link: capture.link,
-      status: "pending",
-    });
-    await db.deleteCapture(capture.id);
-    await db.deletePendingAction(chatId);
-    await telegram.sendMessage(chatId, `Objetivo "${name}" creado. Guardado ahí.`);
-    return { action: "objective_created_and_item_attached", objective, item };
+  // Criterion 2: forwarding a photo saves it immediately — largest available size, downloaded
+  // from Telegram and uploaded to the private `item-images` Supabase Storage bucket.
+  if (Array.isArray(message.photo) && message.photo.length > 0) {
+    const largest = message.photo[message.photo.length - 1];
+    const file = await telegram.getFile(largest.file_id);
+    const bytes = await telegram.downloadFile(file.file_path);
+    const imagePath = `${chatId}/${Date.now()}-${largest.file_id}.jpg`;
+    await db.uploadImage(imagePath, bytes, "image/jpeg");
+    const item = await db.insertItem({ chat_id: chatId, image_path: imagePath, status: "pending" });
+    await telegram.sendMessage(chatId, CONFIRMATION_TEXT);
+    return { action: "item_saved", item };
   }
 
-  // Criterion 1: forwarding a link creates a pending item (prompts for an objective first).
+  const text = (message.text || "").trim();
+
+  // Criterion 1: forwarding a link saves it immediately, no objective prompt.
   if (URL_RE.test(text)) {
-    const capture = await db.insertCapture(chatId, text);
-    const objectives = await db.listObjectives(chatId);
-    const buttons = objectives.map((o) => [
-      { text: o.name, callback_data: `obj:${capture.id}:${o.id}` },
-    ]);
-    buttons.push([{ text: "+ nuevo objetivo", callback_data: `newobj:${capture.id}` }]);
-    await telegram.sendMessage(chatId, "Elige un objetivo:", { inline_keyboard: buttons });
-    return { action: "prompted_objective_selection", capture };
+    const item = await db.insertItem({ chat_id: chatId, link: text, status: "pending" });
+    await telegram.sendMessage(chatId, CONFIRMATION_TEXT);
+    return { action: "item_saved", item };
   }
 
   return { action: "ignored" };
@@ -71,31 +68,8 @@ async function handleCallbackQuery(callbackQuery, { db, telegram, onSenderId }) 
 
   const data = callbackQuery.data || "";
 
-  // Criterion 2: selecting an existing objective saves the item.
-  if (data.startsWith("obj:")) {
-    const [, captureId, objectiveId] = data.split(":");
-    const capture = await db.getCapture(captureId);
-    const item = await db.insertItem({
-      objective_id: objectiveId,
-      chat_id: chatId,
-      link: capture.link,
-      status: "pending",
-    });
-    await db.deleteCapture(capture.id);
-    await telegram.answerCallbackQuery(callbackQuery.id, "Guardado.");
-    return { action: "item_saved", item };
-  }
-
-  // Criterion 3, step 1: "+ nuevo objetivo" prompts for a name.
-  if (data.startsWith("newobj:")) {
-    const [, captureId] = data.split(":");
-    await db.setPendingAction(chatId, captureId);
-    await telegram.answerCallbackQuery(callbackQuery.id);
-    await telegram.sendMessage(chatId, "¿Cómo se llama el nuevo objetivo?");
-    return { action: "awaiting_objective_name" };
-  }
-
-  // Criterion 5: triage decision updates the item's status, nothing is blocked by it.
+  // Criterion 4: triage still works exactly as in spec 001, unchanged — whether the item has a
+  // link or an image, the status update is the same.
   if (data.startsWith("triage:")) {
     const [, itemId, decisionKey] = data.split(":");
     const status = TRIAGE_STATUS_BY_ACTION[decisionKey];

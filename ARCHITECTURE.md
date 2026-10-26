@@ -1,6 +1,12 @@
 # save2grow — Architecture (as-built)
 
 > Describes what is built, never what is planned — what is missing lives in `specs/`.
+>
+> **Spec 002 rolled back part of spec 001's capture flow.** The objective prompt, the
+> existing/new-objective buttons, and the `objectives`/`captures`/`pending_actions` tables are
+> gone from the live code. Read "Spec 001" below only for what is still true (runtime,
+> zero-dependency pattern, owner whitelist, cron DST handling); its "Core logic" and "Flow"
+> subsections describe the pre-rollback capture behavior and are superseded by "Spec 002" below.
 
 ## Spec 001 — Core loop: capture, prioritized push, exit triage
 
@@ -15,40 +21,11 @@
   so the workflow fires at both 06:00 and 07:00 UTC and gates the actual call on the real
   Madrid-local hour computed at run time (`TZ=Europe/Madrid date +%H`), rather than hardcoding one
   UTC offset that would drift twice a year.
-- **Database**: Supabase Postgres, schema in `supabase/migrations/0001_init.sql` — `objectives`,
-  `items`, `captures` (a link staged between being received and attached to an objective),
-  `pending_actions` (one outstanding "name the new objective" prompt per chat).
-- No `@supabase/supabase-js`, no Telegram SDK, no AI/LLM SDK anywhere: all three integrations
-  (Supabase PostgREST, Telegram Bot API) are thin `fetch`-based wrappers in
+- No `@supabase/supabase-js`, no Telegram SDK, no AI/LLM SDK anywhere: all integrations (Supabase
+  PostgREST + Storage, Telegram Bot API) are thin `fetch`-based wrappers in
   `supabase/functions/_shared/db.js` and `supabase/functions/_shared/telegram.js`. This keeps the
-  dependency graph at zero npm packages, which is also what makes criterion 6 (no AI calls) true
+  dependency graph at zero npm packages, which is also what makes the "no AI calls" criterion true
   by construction rather than by a case-by-case audit.
-
-### Core logic (testable without live credentials)
-
-- `supabase/functions/_shared/webhook-handler.js` — `handleUpdate(update, {db, telegram,
-  onSenderId})`: criteria 1 (prompt with objective buttons), 2 (save on selection), 3 (new
-  objective two-message flow), 5 (triage). Takes its collaborators as plain objects so tests pass
-  in-memory fakes instead of a real Supabase/Telegram connection.
-- `supabase/functions/_shared/push-handler.js` — `buildDailyPush(db)` / `runDailyPush(db,
-  telegram)`: criterion 4 (oldest-first, capped at 3 per objective, 3 triage buttons per item).
-- The two Edge Function `index.ts` files are thin wiring only: read env vars, call the shared
-  logic, map to an HTTP response. No business logic lives there.
-
-### Flow
-
-1. A message containing a URL creates a `captures` row and replies with one inline button per
-   existing objective (for that chat) plus "+ nuevo objetivo".
-2. Tapping an objective button reads the capture, inserts the `items` row
-   (`link, objective_id, chat_id, status='pending', created_at`), and discards the capture.
-3. Tapping "+ nuevo objetivo" stores a `pending_actions` row and asks for a name; the chat's next
-   message creates the objective, attaches the item to it, and clears both the capture and the
-   pending action.
-4. The daily push (cron-triggered) selects, per objective, the oldest 3 `pending` items and sends
-   one Telegram message per item with the 3 triage buttons (Borrar / Guardar como recurso /
-   Pendiente), each button's `callback_data` carrying the item id and the decision.
-5. Tapping a triage button updates `items.status` to `deleted` / `resource` / stays `pending`.
-   Nothing caps how many items can be `pending` at once — the push is a nudge, never a block.
 
 ### Owner whitelist — enforced
 
@@ -63,13 +40,11 @@ useful live — see the deploy steps below.
 ### Tests
 
 - `tests/webhook-handler.test.js`, `tests/push-handler.test.js`, `tests/fakes.js` — Node's built-in
-  test runner (`node --test`), zero extra dependencies. Evidence: `evals/run.sh:14-30`, run output
-  below.
-- `evals/run.sh` — criteria 1-5 via the unit test suite, criterion 6 via
-  `grep -rE "anthropic|openai|@anthropic-ai" supabase/functions src`.
+  test runner (`node --test`), zero extra dependencies.
+- `evals/run.sh` — one function per criterion, called at the bottom of the file; run output is
+  the evidence.
 - Criterion 7 (live end-to-end smoke test) is manual by design (needs a live bot token and Alis's
-  own Telegram account) — checklist in `learnings/001-smoke-test.md`, to be filled in after
-  deploy.
+  own Telegram account) — checklist in `learnings/001-smoke-test.md`, filled in after deploy.
 
 ### Deploying (not run by this agent — no push/merge, no live secrets here)
 
@@ -86,3 +61,73 @@ The four secrets (`TELEGRAM_BOT_TOKEN`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
 `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `TELEGRAM_BOT_TOKEN` from their own Supabase
 function env (set separately via `supabase secrets set`, mirroring the same values) — plus a 5th,
 `OWNER_TELEGRAM_ID` (set only as a secret — not written here), for the whitelist above.
+
+## Spec 002 — Simplified capture: drop the objective prompt, accept images
+
+### Database
+
+Schema in `supabase/migrations/0001_init.sql` + `0002_simplified_capture.sql`. Live tables: a
+single `items` table —
+
+```
+items (id, chat_id, link <nullable>, image_path <nullable>, status, created_at)
+  check (link is not null or image_path is not null)
+```
+
+`objective_id`, `objectives`, `captures`, `pending_actions` are dropped, not left unused (see
+`decisions.md`, 2026-10-26). A private Supabase Storage bucket, `item-images`
+(`public = false`), holds captured photo bytes; nothing in this codebase ever makes it public —
+`_shared/db.js#getSignedUrl` is the only read path.
+
+### Core logic (testable without live credentials)
+
+- `supabase/functions/_shared/webhook-handler.js` — `handleUpdate(update, {db, telegram,
+  onSenderId})`:
+  - A text message containing a URL (criterion 1): inserts an `items` row
+    (`link, chat_id, status='pending'`) directly and replies `"Guardado."` with no
+    `reply_markup` at all.
+  - A message with a `photo` array (criterion 2): takes the largest size (last element), calls
+    `telegram.getFile` for its `file_path`, downloads the bytes with `telegram.downloadFile`,
+    uploads them via `db.uploadImage` to the `item-images` bucket at
+    `<chat_id>/<timestamp>-<file_id>.jpg`, inserts an `items` row
+    (`image_path, chat_id, status='pending'`), and replies the same `"Guardado."`.
+  - A `triage:<item_id>:<decision>` callback (criterion 4, unchanged from spec 001): updates
+    `items.status` to `deleted` / `resource` / stays `pending`. Works identically for a link or an
+    image item — triage never inspects which one it is.
+  - No `obj:`, `newobj:` or `awaiting_objective_name` handling anywhere (criterion 6).
+- `supabase/functions/_shared/push-handler.js` — `buildDailyPush(db)` / `runDailyPush(db,
+  telegram)` (criterion 3): selects the oldest 3 `pending` items **overall** (`db.getPendingItems`
+  — no more per-objective grouping, since objective is out of scope). For each item: a link item
+  sends a text message (`telegram.sendMessage`) with the link as the body; an image item resolves
+  a signed URL (`db.getSignedUrl`) and sends it as a photo (`telegram.sendPhoto`). Both carry the
+  same 3 triage buttons (Borrar / Guardar como recurso / Pendiente).
+- The two Edge Function `index.ts` files are unchanged wiring: read env vars, call the shared
+  logic, map to an HTTP response.
+
+### Flow
+
+1. A message containing a URL inserts an `items` row directly (`status='pending'`) and replies
+   `"Guardado."` — no buttons, no prompt.
+2. A message with a photo downloads the largest size, uploads it to the private `item-images`
+   bucket, inserts an `items` row referencing the stored path, and replies the same `"Guardado."`.
+3. The daily push (cron-triggered, unchanged schedule) selects the oldest 3 `pending` items overall
+   and sends one Telegram message per item (text for a link, photo for an image) with the 3 triage
+   buttons, each button's `callback_data` carrying the item id and the decision.
+4. Tapping a triage button updates `items.status` to `deleted` / `resource` / stays `pending`,
+   exactly as in spec 001, regardless of whether the item is a link or an image.
+
+### Tests
+
+- Same two test files as spec 001 (`tests/webhook-handler.test.js`, `tests/push-handler.test.js`),
+  rewritten for the new behavior; `tests/fakes.js` gained `uploadImage`/`getSignedUrl` on the fake
+  db and `getFile`/`downloadFile`/`sendPhoto` on the fake Telegram client.
+- `evals/run.sh` — `spec002_unit_tests`, `spec002_no_ai_calls`, `spec002_objective_ui_removed`.
+- Criterion 7 (live smoke test) is manual by design — checklist in `learnings/002-smoke-test.md`,
+  filled in by Alis after deploy.
+
+### Deploying
+
+Same steps as spec 001 above, plus `supabase db push` to apply
+`0002_simplified_capture.sql` (drops the objective tables/column, adds `image_path`, creates the
+`item-images` bucket). No new secrets — image upload/signing reuses the existing
+`SUPABASE_SERVICE_ROLE_KEY`.

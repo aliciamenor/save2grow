@@ -1,5 +1,5 @@
 ---
-status: pendiente
+status: implementada
 depends_on: []
 ---
 
@@ -102,3 +102,64 @@ storage, her own account, no third party involved.
   the existing roadmap in `context/scope.md`.
 - The browsing feed/interface → spec 003, built right after this one merges, against its final
   schema.
+
+## Evidence
+
+Branch `spec-002-simplified-capture`. `evals/run.sh` output in full:
+
+```
+PASS 001.6 no AI/LLM import in supabase/functions or src
+PASS 002.1-4 unit tests (direct link save, photo save, overall-oldest-3 push, triage)
+PASS 002.5 no AI/LLM import in supabase/functions or src
+PASS 002.6 objective-selection code path removed from the live webhook handler
+4 pass · 0 fail
+```
+
+Per criterion:
+
+1. `tests/webhook-handler.test.js:7-32` ("criterion 1: a URL message is saved directly with a
+   plain confirmation") — asserts the inserted `items` row has no `objective_id` field and
+   `sentMessages[0].reply_markup === undefined`. Implementation:
+   `supabase/functions/_shared/webhook-handler.js:55-61`.
+2. `tests/webhook-handler.test.js:34-64` ("criterion 2: a photo message downloads the largest size
+   and saves it") — asserts `telegram.getFile` was called with the last `photo` array element's
+   `file_id`, `db.uploadImage` received the downloaded bytes, and the `items` row's `image_path`
+   matches the uploaded path. Implementation:
+   `supabase/functions/_shared/webhook-handler.js:41-50`.
+3. `tests/push-handler.test.js:7-32` ("criterion 3: only the oldest 3 pending items overall are
+   selected") + `:34-50` ("the cap of 3 is overall, across chats/items, not per objective") —
+   6-item/5-item fixtures across chats and former-objective groupings, asserting exactly the
+   oldest 3 are pushed. Implementation: `supabase/functions/_shared/push-handler.js:18-30`
+   (`db.getPendingItems(cap)`, no per-objective loop).
+4. `tests/webhook-handler.test.js:70-134` (Borrar/Guardar como recurso/Pendiente, carried over
+   unmodified from spec 001's assertions) + `:137-152` ("triage works the same on an image item")
+   — same `updateItemStatus` call shape regardless of `link` vs `image_path`. Implementation:
+   `supabase/functions/_shared/webhook-handler.js:68-83` (triage branch never inspects item type).
+5. `evals/run.sh` `spec002_no_ai_calls` — `grep -rE "anthropic|openai|@anthropic-ai"
+   supabase/functions src` finds nothing; PASS above.
+6. `evals/run.sh` `spec002_objective_ui_removed` — `grep -rE "newobj:|obj:|awaiting_objective_name"
+   supabase/functions/_shared/webhook-handler.js supabase/functions/telegram-webhook` finds
+   nothing; PASS above. `pending_actions`, `captures`, `objectives` tables and `items.objective_id`
+   are dropped by `supabase/migrations/0002_simplified_capture.sql:12-19` (decision recorded in
+   `decisions.md`, 2026-10-26).
+7. Manual, not run by this agent — checklist in `learnings/002-smoke-test.md`, "not yet run".
+
+Full `node --test` run (12/12 passing), for the record:
+
+```
+✔ criterion 3: only the oldest 3 pending items overall are selected, with 3 triage buttons
+✔ criterion 3: the cap of 3 is overall, across chats/items, not per objective
+✔ criterion 3/4: an image item is pushed as a photo via a signed URL, with triage buttons
+✔ runDailyPush sends a text message for a link item and a photo for an image item
+✔ criterion 1: a URL message is saved directly with a plain confirmation
+✔ criterion 2: a photo message downloads the largest size and saves it
+✔ criterion 4: Borrar sets status=deleted
+✔ criterion 4: Guardar como recurso sets status=resource
+✔ criterion 4: Pendiente leaves status=pending and does not block further capture
+✔ criterion 4: triage works the same on an image item
+✔ logs the sender id via onSenderId without blocking the flow
+✔ criterion 6: no objective-selection buttons are ever sent for a link or a photo
+ℹ tests 12
+ℹ pass 12
+ℹ fail 0
+```
