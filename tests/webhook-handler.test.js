@@ -319,6 +319,129 @@ test("spec005: a non-matching link still saves normally (no false-positive dupli
   assert.equal(sentMessages[0].text, "Guardado.");
 });
 
+// Spec 006 criterion 1: a YouTube URL is detected before the generic OG fetch runs, and
+// resolved via fetchYouTubeOembed instead — never fetchOgPreview.
+test("spec006 criterion 1: a YouTube link fetches via fetchYouTubeOembed, not fetchOgPreview", async () => {
+  const { db, calls } = makeFakeDb();
+  const { telegram, sentMessages } = makeFakeTelegram();
+  const seenYouTubeUrls = [];
+  let ogPreviewCalled = false;
+  const fetchYouTubeOembed = async (url) => {
+    seenYouTubeUrls.push(url);
+    return { title: "A YouTube video", description: null, image: "https://i.ytimg.com/x.jpg" };
+  };
+  const fetchOgPreview = async () => {
+    ogPreviewCalled = true;
+    return null;
+  };
+
+  const update = {
+    message: {
+      chat: { id: 42 },
+      from: { id: 999 },
+      text: "mira esto https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    },
+  };
+
+  const result = await handleUpdate(update, { db, telegram, fetchOgPreview, fetchYouTubeOembed });
+
+  assert.equal(result.action, "item_saved");
+  assert.deepEqual(seenYouTubeUrls, ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]);
+  assert.equal(ogPreviewCalled, false);
+  assert.equal(sentMessages[0].text, "Guardado.");
+  assert.equal(calls.updateItemPreview.length, 1);
+  assert.deepEqual(calls.updateItemPreview[0].preview, {
+    title: "A YouTube video",
+    description: null,
+    image: "https://i.ytimg.com/x.jpg",
+  });
+});
+
+test("spec006 criterion 1: a youtu.be short link also routes to fetchYouTubeOembed", async () => {
+  const { db, calls } = makeFakeDb();
+  const { telegram } = makeFakeTelegram();
+  const fetchYouTubeOembed = async () => ({ title: "Short link video", description: null, image: null });
+
+  const result = await handleUpdate(
+    { message: { chat: { id: 42 }, from: { id: 999 }, text: "https://youtu.be/dQw4w9WgXcQ" } },
+    { db, telegram, fetchYouTubeOembed },
+  );
+
+  assert.equal(result.action, "item_saved");
+  assert.equal(calls.updateItemPreview.length, 1);
+  assert.deepEqual(calls.updateItemPreview[0].preview, {
+    title: "Short link video",
+    description: null,
+    image: null,
+  });
+});
+
+test("spec006 criterion 1: a non-YouTube URL is untouched, still goes through fetchOgPreview", async () => {
+  const { db, calls } = makeFakeDb();
+  const { telegram } = makeFakeTelegram();
+  let youtubeCalled = false;
+  const fetchYouTubeOembed = async () => {
+    youtubeCalled = true;
+    return null;
+  };
+  const fetchOgPreview = async (url) => ({ title: "Regular article", description: "desc", image: null });
+
+  const result = await handleUpdate(
+    { message: { chat: { id: 42 }, from: { id: 999 }, text: "https://example.com/article" } },
+    { db, telegram, fetchOgPreview, fetchYouTubeOembed },
+  );
+
+  assert.equal(result.action, "item_saved");
+  assert.equal(youtubeCalled, false);
+  assert.equal(calls.updateItemPreview.length, 1);
+  assert.deepEqual(calls.updateItemPreview[0].preview, {
+    title: "Regular article",
+    description: "desc",
+    image: null,
+  });
+});
+
+// Spec 006 criterion 2: a failed/non-2xx/timeout oEmbed call falls back to the plain-link card
+// (null preview, no write), never blocking or breaking capture — and never falling through to
+// fetchOgPreview, which YouTube blocks anyway.
+test("spec006 criterion 2: a failing fetchYouTubeOembed resolves no preview, capture unaffected", async () => {
+  const { db, calls } = makeFakeDb();
+  const { telegram, sentMessages } = makeFakeTelegram();
+  let ogPreviewCalled = false;
+  const fetchYouTubeOembed = async () => null; // non-2xx/timeout/network error already resolved to null
+  const fetchOgPreview = async () => {
+    ogPreviewCalled = true;
+    return { title: "should never be used" };
+  };
+
+  const result = await handleUpdate(
+    { message: { chat: { id: 42 }, from: { id: 999 }, text: "https://www.youtube.com/watch?v=dead" } },
+    { db, telegram, fetchOgPreview, fetchYouTubeOembed },
+  );
+
+  assert.equal(result.action, "item_saved");
+  assert.equal(sentMessages[0].text, "Guardado.");
+  assert.equal(ogPreviewCalled, false);
+  assert.equal(calls.updateItemPreview.length, 0);
+});
+
+test("spec006 criterion 2: a throwing fetchYouTubeOembed never breaks capture", async () => {
+  const { db, calls } = makeFakeDb();
+  const { telegram, sentMessages } = makeFakeTelegram();
+  const fetchYouTubeOembed = async () => {
+    throw new Error("boom");
+  };
+
+  const result = await handleUpdate(
+    { message: { chat: { id: 42 }, from: { id: 999 }, text: "https://www.youtube.com/watch?v=boom" } },
+    { db, telegram, fetchYouTubeOembed },
+  );
+
+  assert.equal(result.action, "item_saved");
+  assert.equal(sentMessages[0].text, "Guardado.");
+  assert.equal(calls.updateItemPreview.length, 0);
+});
+
 test("spec005: a duplicate link never triggers an OG preview fetch", async () => {
   const { db, calls } = makeFakeDb({
     items: [{ id: 53, chat_id: 42, link: "https://example.com/dup2", status: "pending", created_at: "2026-01-01" }],

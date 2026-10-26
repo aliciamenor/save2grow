@@ -268,5 +268,34 @@ spec005_unit_tests
 spec005_photo_path_untouched
 spec005_no_ai_calls
 
+# --- 006-youtube-oembed-preview --------------------------------------------
+
+spec006_unit_tests() {
+  # Criteria 1, 2 — unit tests under tests/youtube-oembed.test.js (URL-pattern matching,
+  # oEmbed-response mapping, non-2xx/network-error/timeout fallback) and
+  # tests/webhook-handler.test.js (YouTube link routes to fetchYouTubeOembed before the generic
+  # OG fetch; a non-YouTube link is untouched; a failing/throwing oEmbed call falls back to the
+  # plain-link card without ever calling fetchOgPreview). Same `node --test` run as every other
+  # spec, named as its own eval so these criteria are traceable.
+  if node --test 2>&1 | tee /tmp/save2grow-006-test-output.txt | grep -q '^ℹ fail 0$'; then
+    ok "006.1-2 unit tests (YouTube URL detection + oEmbed mapping, failure fallback)"
+  else
+    ko "006.1-2 unit tests (YouTube URL detection + oEmbed mapping, failure fallback)"
+    ev "see /tmp/save2grow-006-test-output.txt"
+  fi
+}
+
+spec006_no_ai_calls() {
+  # Criterion 3 — same check as every prior spec, unchanged, re-run as its own named eval.
+  if grep -rE "anthropic|openai|@anthropic-ai" supabase/functions web src 2>/dev/null | grep -v '^Binary' | grep -q .; then
+    ko "006.3 no AI/LLM import in supabase/functions, web, or src"
+  else
+    ok "006.3 no AI/LLM import in supabase/functions, web, or src"
+  fi
+}
+
+spec006_unit_tests
+spec006_no_ai_calls
+
 printf '%s pass · %s fail\n' "$passed" "$failed"
 [ "$failed" = "0" ]
