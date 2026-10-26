@@ -131,3 +131,117 @@ Same steps as spec 001 above, plus `supabase db push` to apply
 `0002_simplified_capture.sql` (drops the objective tables/column, adds `image_path`, creates the
 `item-images` bucket). No new secrets — image upload/signing reuses the existing
 `SUPABASE_SERVICE_ROLE_KEY`.
+
+## Spec 003 — Local feed with magic-link auth
+
+### What this adds
+
+The first real UI and the first real auth: a local-only static page under `web/` where Alis logs
+in with a Supabase magic-link email and sees every saved `items` row — links and images — newest
+first, with the same 3 triage actions (Borrar / Guardar como recurso / Pendiente) available
+inline. No public hosting yet (closed decision, delegated to Vercel later, same code).
+
+### Frontend (zero npm dependencies, same pattern as the rest of the repo)
+
+- `web/index.html` — the whole page: a login form (email + "Enviar enlace") and a feed section,
+  hidden/shown by auth state. Root element is `<body id="app">` (what `evals/serve-check.sh`
+  asserts on). Loads Supabase's JS client from a pinned CDN URL
+  (`https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js`), not
+  bundled — no build step, no `npm install`.
+- `web/js/config.js` — `SUPABASE_URL` and `SUPABASE_ANON_KEY` (Supabase's own *publishable*
+  values — safe to ship to a browser by design; identity and access are enforced by RLS, not by
+  keeping this file secret) and `REDIRECT_URL`. `SUPABASE_ANON_KEY` ships as a placeholder; see
+  "Deploying" below.
+- `web/js/feed.js` — pure, DOM-free logic, unit tested with a fake Supabase client
+  (`tests/web-fakes.js`, `tests/web-feed.test.js`):
+  - `fetchFeed(supabase)` (criterion 4): `items` ordered `created_at` descending; an image item
+    (`image_path` set) resolves a signed URL via `supabase.storage.from('item-images')
+    .createSignedUrl(path, 3600)` (1 hour — delegated decision, matches the expiry already used
+    by the Telegram daily push); a link item uses `items.link` directly. Never a public URL.
+  - `triageItem(supabase, itemId, decision)` (criterion 5): maps `delete`/`resource`/`pending` to
+    `items.status` and issues `.from('items').update({status}).eq('id', itemId)` — same 3
+    decisions and same resulting statuses as the Telegram push's inline keyboard.
+  - `applyTriageResult(viewModels, itemId, newStatus)`: pure in-memory list update, so the page
+    can patch one item's status text without a full re-render or page reload.
+- `web/js/app.js` — DOM wiring only (login form submit, `onAuthStateChange`, rendering the list,
+  wiring the 3 buttons to `onTriage`). Not unit tested, same split as `index.ts` vs
+  `_shared/*.js` in the Telegram bot: the testable logic lives in `feed.js`, the wiring doesn't.
+  `signInWithOtp({email})` failures and successes both render a single plain line
+  (`"Revisa tu email."` / a generic retry message) — never a raw error or stack trace (criterion
+  2).
+- `web/css/style.css` — minimal styling (delegated decision: legible and usable, no design
+  system; this is explicitly not the eventual Vercel polish pass).
+
+### RLS — the security-critical piece (criterion 6)
+
+`supabase/migrations/0003_local_feed_auth.sql` enables row-level security on `items` and adds a
+`select`/`update` policy for the `authenticated` role (no `insert`/`delete` policy — denied by
+default — capture still only happens through the Telegram bot's service-role key, unaffected by
+RLS). It adds one more `select` policy on `storage.objects` scoped to the `item-images` bucket, so
+the logged-in page can call `createSignedUrl` as itself.
+
+Every policy's `using` clause is:
+
+```sql
+auth.jwt() ->> 'email' = current_setting('app.allowed_owner_email', true)
+```
+
+**Not** `auth.role() = 'authenticated'` alone — a stranger who requests their own magic link and
+logs in successfully gets `authenticated`, but their email never matches the one allowed value,
+so they see zero rows and can update nothing (closed decision, Gate 1, 2026-10-26).
+
+The allowed email is never a literal in this repo (stopping condition honored, same pattern as
+`OWNER_TELEGRAM_ID` in spec 001 — see `decisions.md`, 2026-10-25, and the 2026-10-26 entry for
+this spec). It's read from the Postgres session setting `app.allowed_owner_email`, set once per
+database — see "Deploying" below.
+
+### Tests
+
+- `tests/web-fakes.js`, `tests/web-feed.test.js` — same `node --test` runner as every other test
+  file in this repo, covering criteria 4 and 5 against `web/js/feed.js`.
+- `evals/serve-check.sh` — starts `python3 -m http.server` inside `web/`, curls it, asserts HTTP
+  200 and the root element, kills the server (criterion 1).
+- `evals/run.sh` — `spec003_serve_check`, `spec003_unit_tests`, `spec003_rls_policy` (a static
+  check of the migration's SQL — see the comment in `evals/run.sh` for why this is structural,
+  not a live cross-user connection: no local Postgres/Docker and no live Supabase credentials are
+  available to the implementing agent, the same constraint that makes criteria 2/3/8 manual-only),
+  `spec003_no_ai_calls`.
+- Criteria 2, 3, 8 (the real email round-trip, session persistence after clicking the link, and
+  the full end-to-end run) are manual by design — checklist in `learnings/003-smoke-test.md`,
+  which also carries the live version of criterion 6's cross-user check.
+
+### Deploying
+
+```
+supabase db push                              # applies 0003_local_feed_auth.sql
+supabase functions deploy telegram-webhook    # unchanged, redeploy only if spec 001/002 code moved
+supabase functions deploy daily-push          # same
+```
+
+Then, outside the repo (not run by the implementing agent — same as every secret in this
+product):
+
+1. **Set the allowed-owner-email database setting.** In the Supabase SQL editor (or via `psql`),
+   run, once per database, with the real value of the `ALLOWED_OWNER_EMAIL` secret substituted in
+   (never committed):
+   ```sql
+   alter database postgres set app.allowed_owner_email = '<value of ALLOWED_OWNER_EMAIL>';
+   ```
+   New connections pick this up automatically; existing pooled connections may need a restart of
+   the connection pooler or a moment to cycle. This is the one piece of config the RLS policies in
+   `0003_local_feed_auth.sql` depend on — without it, `current_setting(...)` returns `null` and
+   every policy denies everyone, including Alis.
+2. **Register the local redirect URL.** Supabase dashboard → Authentication → URL Configuration →
+   add `http://localhost:8787/` to "Redirect URLs" (must match `web/js/config.js`'s
+   `REDIRECT_URL` exactly, including the trailing slash). Without this, Supabase rejects the
+   magic-link redirect with an error instead of logging Alis in.
+3. **Fill in the publishable config.** Open `web/js/config.js` and replace
+   `SUPABASE_ANON_KEY`'s placeholder with the project's "anon public" key (Project Settings →
+   API). `SUPABASE_URL` is already set to this project's URL.
+4. **Run the page locally:**
+   ```
+   cd web && python3 -m http.server 8787
+   ```
+   then open `http://localhost:8787/` in a browser. Port 8787 is the one documented and tested
+   port — if Alis uses a different port, step 2's redirect URL and `REDIRECT_URL` in
+   `config.js` must both change to match.

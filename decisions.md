@@ -120,3 +120,58 @@ silently drifting into two different voices as photo support was added alongside
 **What would invalidate it**: Fase 1 reintroducing a reason to distinguish the two in the reply
 (e.g. "Guardado como imagen." if an operator needs to tell at a glance which kind was saved
 without opening Supabase) — nothing in this spec's scope needs that distinction yet.
+
+## 2026-10-26 · [003-local-feed-with-auth] RLS checks the allowed email via a Postgres session setting, never a literal
+
+**What is decided**: `supabase/migrations/0003_local_feed_auth.sql` enables RLS on `items` and
+adds a `select`/`update` policy on `items`, and a `select` policy on `storage.objects` for the
+`item-images` bucket, all with the same predicate: `auth.jwt() ->> 'email' =
+current_setting('app.allowed_owner_email', true)`. The real email is never written into this
+repo; it's set once per database with `alter database postgres set app.allowed_owner_email =
+'<value>'`, run outside this repo from the `ALLOWED_OWNER_EMAIL` secret.
+
+**Why**: the spec's stopping condition ruled out committing the allowed email as a literal
+anywhere, the same rule already applied to `OWNER_TELEGRAM_ID` (see the 2026-10-25 entry above).
+RLS policies can't read an environment variable directly — they run inside Postgres, not inside
+an Edge Function's runtime — so a Postgres-level setting is the equivalent of an env var for this
+layer: a value supplied once, outside the committed SQL, that the policy reads at query time
+instead of hardcoding.
+
+**What would invalidate it**: a second real user (mirroring the note on `OWNER_TELEGRAM_ID`) turns
+this from "one allowed email" into "a table of allowed identities" — at that point the single
+session setting becomes a lookup table, not a bigger setting.
+
+## 2026-10-26 · [003-local-feed-with-auth] RLS checks the specific identity, not role-only
+
+**What is decided**: every policy in `0003_local_feed_auth.sql` compares `auth.jwt() ->> 'email'`
+against the one allowed value — never just `auth.role() = 'authenticated'` on its own.
+
+**Why**: this repo is public and magic-link signup is open to anyone who requests a link for
+their own email. Role-only RLS would let a stranger log in as themselves and still read or write
+Alis's rows, because they'd legitimately hold the `authenticated` role. Checking the specific
+email is what makes "a stranger logs in successfully" and "a stranger sees Alis's data" two
+different, unrelated things.
+
+**What would invalidate it**: a second real user (Fase 1, same condition as the two entries
+above) — at that point the policy's comparison becomes "is this email in the allowed set", not
+"does it equal the one value".
+
+## 2026-10-26 · [003-local-feed-with-auth] Web feed's frontend logic is split pure-logic vs. DOM wiring, same shape as the Edge Functions
+
+**What is decided**: `web/js/feed.js` holds every function that talks to Supabase or decides what
+to render (`fetchFeed`, `triageItem`, `applyTriageResult`) with zero DOM access, so it runs and is
+unit tested under Node with a fake Supabase client (`tests/web-fakes.js`,
+`tests/web-feed.test.js`). `web/js/app.js` holds only DOM reads/writes and event wiring, calling
+into `feed.js` for everything else, and is not unit tested.
+
+**Why**: this repo already draws this exact line for the Telegram bot —
+`supabase/functions/_shared/*.js` is tested, `index.ts`'s env/HTTP wiring isn't — specifically so
+business logic can be verified without live credentials or a running runtime (Deno there, a
+browser DOM here). Reusing the same split means criteria 4 and 5's evals (render order/content/
+status, triage's update call and in-memory state change) are fully scriptable without a headless
+browser or any new dependency (e.g. jsdom), keeping the zero-npm-dependency property intact for
+the frontend too.
+
+**What would invalidate it**: a future criterion that genuinely needs DOM behavior under test
+(e.g. keyboard navigation, focus management) — at that point a headless-DOM dependency gets added
+for that feature only, not as a blanket tooling change.

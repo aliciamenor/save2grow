@@ -65,5 +65,73 @@ spec002_unit_tests
 spec002_no_ai_calls
 spec002_objective_ui_removed
 
+# --- 003-local-feed-with-auth ----------------------------------------------
+
+spec003_serve_check() {
+  # Criterion 1 — the local page is servable with zero extra tooling.
+  if bash evals/serve-check.sh 8787 > /tmp/save2grow-003-serve-check-output.txt 2>&1; then
+    ok "003.1 web/ serves index.html via python3 -m http.server, no build step"
+  else
+    ko "003.1 web/ serves index.html via python3 -m http.server, no build step"
+    ev "see /tmp/save2grow-003-serve-check-output.txt"
+  fi
+}
+
+spec003_unit_tests() {
+  # Criteria 4, 5 — feed render (order, content, status per item kind) and triage (correct
+  # Supabase update call + in-memory status update), against web/js/feed.js with a fake
+  # Supabase client (tests/web-feed.test.js, tests/web-fakes.js). Same `node --test` run as
+  # spec001/002's unit tests (no path filter — Node's test runner finds every *.test.js under
+  # tests/ on its own), named here as its own eval so each criterion is traceable.
+  if node --test 2>&1 | tee /tmp/save2grow-003-test-output.txt | grep -q '^ℹ fail 0$'; then
+    ok "003.4-5 unit tests (feed render order/content/status, triage update + in-memory state)"
+  else
+    ko "003.4-5 unit tests (feed render order/content/status, triage update + in-memory state)"
+    ev "see /tmp/save2grow-003-test-output.txt"
+  fi
+}
+
+spec003_rls_policy() {
+  # Criterion 6 (static check) — the migration gates `items`/`storage.objects` on the specific
+  # allowed identity (`auth.jwt() ->> 'email'` against a dynamic setting), not
+  # `auth.role() = 'authenticated'` alone, and never commits the real email as a literal.
+  #
+  # This is a structural check of the SQL, not a live cross-user connection: this repo has no
+  # local Postgres/Docker and no live Supabase credentials available to this agent (same
+  # constraint that makes criteria 2/3/8 manual-only). The live version of this exact assertion —
+  # a stranger's own magic link logging in and seeing zero rows — is added to the criterion 8
+  # manual smoke test checklist instead (learnings/003-smoke-test.md).
+  local f
+  f="$(ls supabase/migrations/0003_*.sql 2>/dev/null | head -1)"
+  if [ -z "$f" ]; then
+    ko "003.6 RLS policy checks the specific allowed identity, not role-only"
+    ev "no supabase/migrations/0003_*.sql found"
+    return
+  fi
+  if grep -q "enable row level security" "$f" \
+    && grep -q "auth.jwt() ->> 'email'" "$f" \
+    && grep -q "current_setting('app.allowed_owner_email'" "$f" \
+    && ! grep -qE "'[^']*@[^']*'" "$f"; then
+    ok "003.6 RLS policy checks the specific allowed identity (env-backed), not role-only, no literal email"
+  else
+    ko "003.6 RLS policy checks the specific allowed identity (env-backed), not role-only, no literal email"
+    ev "see $f"
+  fi
+}
+
+spec003_no_ai_calls() {
+  # Criterion 7 — same check as spec001/002, extended to cover web/.
+  if grep -rE "anthropic|openai|@anthropic-ai" supabase/functions web src 2>/dev/null | grep -v '^Binary' | grep -q .; then
+    ko "003.7 no AI/LLM import in supabase/functions, web, or src"
+  else
+    ok "003.7 no AI/LLM import in supabase/functions, web, or src"
+  fi
+}
+
+spec003_serve_check
+spec003_unit_tests
+spec003_rls_policy
+spec003_no_ai_calls
+
 printf '%s pass · %s fail\n' "$passed" "$failed"
 [ "$failed" = "0" ]

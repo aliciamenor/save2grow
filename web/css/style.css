@@ -1,0 +1,73 @@
+/* Spec 003 — minimal styling. Delegated decision: legible and usable, no design system; this is
+   explicitly not a polish pass (that comes once this moves to Vercel). */
+
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 640px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  color: #1a1a1a;
+}
+
+h1 {
+  font-size: 1.25rem;
+}
+
+#login-section input {
+  font-size: 1rem;
+  padding: 0.5rem;
+  width: 100%;
+  max-width: 320px;
+  box-sizing: border-box;
+}
+
+#login-section button {
+  font-size: 1rem;
+  padding: 0.5rem 1rem;
+  margin-top: 0.5rem;
+}
+
+#login-message {
+  margin-top: 0.75rem;
+  font-size: 0.95rem;
+}
+
+#feed-list {
+  list-style: none;
+  padding: 0;
+}
+
+.feed-item {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.feed-item img {
+  max-width: 100%;
+  display: block;
+  margin-bottom: 0.5rem;
+  border-radius: 4px;
+}
+
+.feed-item a {
+  word-break: break-all;
+}
+
+.status {
+  display: inline-block;
+  font-size: 0.85rem;
+  color: #555;
+  margin: 0.4rem 0;
+}
+
+.actions button {
+  margin-right: 0.4rem;
+  font-size: 0.9rem;
+  padding: 0.3rem 0.6rem;
+}
+
+#logout-button {
+  margin-bottom: 1rem;
+}
