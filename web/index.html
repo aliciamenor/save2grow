@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>save2grow</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body id="app">
+    <h1>save2grow</h1>
+
+    <section id="login-section">
+      <form id="login-form">
+        <label for="email-input">Email</label><br />
+        <input id="email-input" type="email" required autocomplete="email" />
+        <br />
+        <button type="submit">Enviar enlace</button>
+      </form>
+      <p id="login-message"></p>
+    </section>
+
+    <section id="feed-section" hidden>
+      <button id="logout-button" type="button">Cerrar sesión</button>
+      <ul id="feed-list"></ul>
+    </section>
+
+    <!-- Supabase's JS client from a CDN, not bundled — zero npm dependencies, same pattern as
+         the rest of this repo (decisions.md, 2026-10-25). Pinned version, well over two weeks
+         old. -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>

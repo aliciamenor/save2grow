@@ -1,5 +1,5 @@
 ---
-status: pendiente
+status: implementada
 depends_on: []
 ---
 
@@ -102,6 +102,42 @@ bypasses RLS entirely. No frontend exists yet.
 
 A real email sent to Alis's real inbox during the manual smoke test (the magic link itself) — no
 containment needed, it's her own inbox. No other external effect.
+
+## Evidence
+
+`evals/run.sh` (run from the repo root, 2026-10-26):
+
+```
+PASS 003.1 web/ serves index.html via python3 -m http.server, no build step
+PASS 003.4-5 unit tests (feed render order/content/status, triage update + in-memory state)
+PASS 003.6 RLS policy checks the specific allowed identity (env-backed), not role-only, no literal email
+PASS 003.7 no AI/LLM import in supabase/functions, web, or src
+8 pass · 0 fail
+```
+
+- Criterion 1 → `spec003_serve_check` (`evals/serve-check.sh`): starts `python3 -m http.server`
+  inside `web/`, curls `http://localhost:8787/`, asserts HTTP 200 and the root `id="app"`.
+- Criteria 4, 5 → `spec003_unit_tests` (`node --test`, picking up `tests/web-feed.test.js`):
+  10 tests, all passing — feed order/content/status per item kind (link vs. image, via a fake
+  Supabase client's `createSignedUrl`), each of the 3 triage decisions' update call, and the
+  pure in-memory status patch.
+- Criterion 6 → `spec003_rls_policy`, a **static** check of
+  `supabase/migrations/0003_local_feed_auth.sql`: asserts RLS is enabled on `items`, every policy
+  compares `auth.jwt() ->> 'email'` against `current_setting('app.allowed_owner_email', true)`
+  (not role-only), and no quoted string containing `@` (no literal email) appears anywhere in the
+  file. This is structural, not a live cross-user connection — no local Postgres/Docker and no
+  live Supabase credentials exist in the implementing agent's environment, the same constraint
+  that makes criteria 2/3/8 manual. The live version of this exact check (a stranger's own magic
+  link logging in and seeing zero rows) is added to `learnings/003-smoke-test.md`'s checklist.
+- Criterion 7 → `spec003_no_ai_calls`: existing grep check, extended to `web/`.
+- Criteria 2, 3, 8 → manual, see `learnings/003-smoke-test.md` (not yet run — needs the deploy
+  steps in `ARCHITECTURE.md`, "Spec 003 — Deploying", applied first by the supervising session).
+
+**Stopping condition honored**: the allowed owner email (`ALLOWED_OWNER_EMAIL`) is not written
+anywhere in this repo. The RLS policy reads it from the Postgres session setting
+`app.allowed_owner_email`, set once per database outside this repo — see `ARCHITECTURE.md` and
+`decisions.md` (2026-10-26, "RLS checks the allowed email via a Postgres session setting, never a
+literal").
 
 ## Out of scope, with reactivation condition
 
