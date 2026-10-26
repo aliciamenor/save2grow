@@ -1,5 +1,5 @@
 ---
-status: pendiente
+status: implementada
 depends_on: []
 ---
 
@@ -28,15 +28,35 @@ live by Alis.
    - Eval: unit test — mock oEmbed JSON response for a `youtube.com/watch?v=...` and a
      `youtu.be/...` URL → asserts the mapped `{title, description:null, image}`; a non-YouTube URL
      is untouched, still goes through `fetchOgPreview`.
+   - **Evidence**: `tests/youtube-oembed.test.js` (`isYouTubeUrl` cases, `fetchYouTubeOembed`
+     mapping cases) and `tests/webhook-handler.test.js` ("spec006 criterion 1: a YouTube link
+     fetches via fetchYouTubeOembed, not fetchOgPreview", "...a youtu.be short link also routes
+     to fetchYouTubeOembed", "...a non-YouTube URL is untouched, still goes through
+     fetchOgPreview"). `evals/run.sh#spec006_unit_tests` — **PASS**, run 2026-10-27, 78/78 tests
+     green (`node --test`).
 2. **A failed/non-2xx/timeout oEmbed call falls back to the plain-link card**, same behavior and
    same honesty as every other failure case in spec 004 — never blocks or breaks capture.
    - Eval: unit test — mock a non-2xx oEmbed response and a network error → asserts `null`,
      same contract as `fetchOgPreview`.
+   - **Evidence**: `tests/youtube-oembed.test.js` ("a non-2xx response resolves null", "a network
+     error resolves null", "a slow response that outlives the timeout resolves null", "a response
+     with no title resolves null") and `tests/webhook-handler.test.js` ("spec006 criterion 2: a
+     failing fetchYouTubeOembed resolves no preview, capture unaffected" — also asserts
+     `fetchOgPreview` is never called as a fallback, "...a throwing fetchYouTubeOembed never
+     breaks capture"). `evals/run.sh#spec006_unit_tests` — **PASS**, run 2026-10-27.
 3. **No AI calls anywhere in this scope** (unchanged hard constraint).
    - Eval: existing grep check, unchanged.
+   - **Evidence**: `evals/run.sh#spec006_no_ai_calls` — **PASS**, run 2026-10-27 (also verified
+     live: `https://www.youtube.com/oembed?url=...&format=json` requires no API key and returns
+     `{"title":"Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)", ...,
+     "thumbnail_url":"https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"}` for a real video,
+     confirming the endpoint itself is not an AI call, just YouTube's own public API).
 4. **Manual smoke test**: Alis forwards a YouTube link she hasn't saved before and confirms the
    feed shows its real title and thumbnail, not the plain-link fallback.
    - Checklist in `learnings/006-smoke-test.md`.
+   - **Evidence**: not run by the implementing agent (needs a live deploy and a real Telegram
+     forward) — checklist written, pending Alis after deploy. See "Still open" in the handoff
+     report.
 
 ## Decisions
 

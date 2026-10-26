@@ -17,6 +17,8 @@ import { makeDb } from "../_shared/db.js";
 import { makeTelegram } from "../_shared/telegram.js";
 // @ts-ignore
 import { fetchOgPreview } from "../_shared/og-preview.js";
+// @ts-ignore
+import { fetchYouTubeOembed } from "../_shared/youtube-oembed.js";
 
 // @ts-ignore - Deno global.
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -56,7 +58,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    await handleUpdate(update, { db, telegram, onSenderId, fetchOgPreview });
+    await handleUpdate(update, { db, telegram, onSenderId, fetchOgPreview, fetchYouTubeOembed });
   } catch (err) {
     console.error("telegram-webhook error:", err);
   }

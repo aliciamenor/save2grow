@@ -276,3 +276,30 @@ intent is scoped to this one capture path only.
 (bypassing this handler) — at that point a race between two near-simultaneous selects could still
 let two duplicates through, and only a real unique constraint closes that gap. Nothing in this
 product writes to `items` outside this one handler today.
+
+## 2026-10-27 · [006-youtube-oembed-preview] YouTube URL matching is anchored to the hostname, not a substring check
+
+**What is decided**: `supabase/functions/_shared/youtube-oembed.js#isYouTubeUrl(url)` matches
+only `youtube.com/watch?v=...` (with an optional `www.` prefix, and other query params allowed
+before `v=`), `m.youtube.com/watch?v=...`, and `youtu.be/...` — anchored right after the
+protocol, so the host itself must be one of those, never a path or query string that merely
+contains the word "youtube". A failing or throwing oEmbed call never falls through to
+`fetchOgPreview`: YouTube blocks that fetch anyway (spec 004), so a failed oEmbed call resolves
+straight to no preview, the same outcome as every other failure case.
+
+**Why**: the spec's delegated criterion was "cover the common real-world forms
+(`youtube.com/watch?v=`, `youtu.be/`, `m.youtube.com/watch?v=`) without over-matching unrelated
+URLs that merely contain 'youtube' as a substring". Anchoring the regex to
+`^https?://(www.|m.)?youtube.com/...` or `^https?://(www.|m.)?youtu.be/...` is the simplest way
+to satisfy both halves at once: it accepts every real YouTube link shape named in the spec and
+rejects `https://example.com/youtube.com/watch?v=x` or `https://notyoutube.com/watch?v=x`, which
+a bare substring check (`url.includes("youtube")`) would wrongly accept. Not falling through to
+`fetchOgPreview` on an oEmbed failure keeps the contract identical to every other link-preview
+failure in this product (spec 004's "never blocks or breaks capture") instead of adding a second,
+pointless network call to an endpoint already known to return nothing useful.
+
+**What would invalidate it**: YouTube changing its oEmbed response shape (no `title`, a renamed
+`thumbnail_url` field) would break the mapping silently back to `null` — caught by
+`tests/youtube-oembed.test.js` if a future test is added against the new shape, not by this
+decision. A future spec extending oEmbed-style previews to another blocked platform is new scope
+per spec 006's own stopping condition, not a reason to generalize this matcher.

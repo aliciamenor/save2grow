@@ -9,6 +9,8 @@
 // a short confirmation and nothing else (criterion 1, 2, 6). Objective selection returns in
 // Fase 1, rebuilt against this simplified schema.
 
+import { isYouTubeUrl } from "./youtube-oembed.js";
+
 const URL_RE = /https?:\/\/\S+/i;
 
 const TRIAGE_STATUS_BY_ACTION = {
@@ -33,10 +35,10 @@ function duplicateReplyText(existingItem) {
 }
 
 export async function handleUpdate(update, ctx) {
-  const { db, telegram, onSenderId, fetchOgPreview } = ctx;
+  const { db, telegram, onSenderId, fetchOgPreview, fetchYouTubeOembed } = ctx;
 
   if (update.message) {
-    return handleMessage(update.message, { db, telegram, onSenderId, fetchOgPreview });
+    return handleMessage(update.message, { db, telegram, onSenderId, fetchOgPreview, fetchYouTubeOembed });
   }
 
   if (update.callback_query) {
@@ -46,7 +48,7 @@ export async function handleUpdate(update, ctx) {
   return { action: "unhandled" };
 }
 
-async function handleMessage(message, { db, telegram, onSenderId, fetchOgPreview }) {
+async function handleMessage(message, { db, telegram, onSenderId, fetchOgPreview, fetchYouTubeOembed }) {
   const chatId = message.chat.id;
   if (onSenderId) onSenderId(message.from && message.from.id);
 
@@ -83,11 +85,21 @@ async function handleMessage(message, { db, telegram, onSenderId, fetchOgPreview
     // callers, and most unit tests above, omit it); a fetch/parse failure already resolves to
     // `null` inside og-preview.js, and the try/catch here is a second line of defense so nothing
     // from this best-effort step can ever surface past the capture flow.
-    if (fetchOgPreview) {
+    if (fetchOgPreview || fetchYouTubeOembed) {
       try {
         const matchedUrl = text.match(URL_RE);
-        console.log("og-preview: fetching", matchedUrl && matchedUrl[0]);
-        const preview = matchedUrl ? await fetchOgPreview(matchedUrl[0]) : null;
+        const urlStr = matchedUrl && matchedUrl[0];
+        console.log("og-preview: fetching", urlStr);
+        // Spec 006 criterion 1: a YouTube URL is detected before the generic OG fetch runs, and
+        // resolved via YouTube's own oEmbed endpoint instead — YouTube blocks the generic
+        // scraper (spec 004's documented, accepted fallback case). A non-YouTube URL is
+        // untouched and still goes through fetchOgPreview exactly as before.
+        let preview = null;
+        if (urlStr && isYouTubeUrl(urlStr) && fetchYouTubeOembed) {
+          preview = await fetchYouTubeOembed(urlStr);
+        } else if (urlStr && fetchOgPreview) {
+          preview = await fetchOgPreview(urlStr);
+        }
         console.log("og-preview: result", JSON.stringify(preview));
         if (preview) {
           await db.updateItemPreview(item.id, preview);

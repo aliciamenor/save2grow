@@ -425,3 +425,68 @@ supabase functions deploy telegram-webhook    # picks up the duplicate check
 ```
 
 `daily-push` is unaffected and does not need redeploying.
+
+## Spec 006 — YouTube previews via oEmbed
+
+### What this adds
+
+YouTube blocks `og-preview.js`'s generic Open Graph scraper for non-browser requests (spec 004's
+documented, accepted fallback case) — confirmed live. A YouTube link always fell back to the
+plain-link card. This spec adds a YouTube-specific path that uses YouTube's own public,
+documented oEmbed endpoint instead, tried before the generic OG fetch.
+
+### YouTube oEmbed (criteria 1, 2)
+
+`supabase/functions/_shared/youtube-oembed.js`:
+
+- `isYouTubeUrl(url)` (delegated decision, criterion: cover the common real-world forms without
+  over-matching): a regex anchored right after the protocol (optional `www.`/`m.` prefix) —
+  `youtube.com/watch?v=` (with or without other query params before `v=`) or `youtu.be/` — so a
+  URL that merely contains "youtube" as a substring elsewhere (path, query, a different domain)
+  never matches.
+- `fetchYouTubeOembed(url, {fetchImpl, timeoutMs})`: fetches
+  `https://www.youtube.com/oembed?url=<encoded url>&format=json` (`YOUTUBE_OEMBED_TIMEOUT_MS =
+  4000`, same `AbortController` pattern as `og-preview.js`) and maps the JSON response to
+  `{title, description, image}` — `title` from the response's `title`, `image` from
+  `thumbnail_url`, `description` always `null` (oEmbed doesn't provide one, never fabricated).
+  Never throws — resolves `null` on a non-2xx response, a network error, a timeout, or a
+  response with no `title`, the same "falls back silently to the plain-link card" contract as
+  `fetchOgPreview` (criterion 2).
+
+`supabase/functions/_shared/webhook-handler.js`'s link-save path now takes an optional
+`ctx.fetchYouTubeOembed` alongside the existing `ctx.fetchOgPreview`: for the matched URL, if
+`isYouTubeUrl` is true and `fetchYouTubeOembed` is supplied, it is called instead of
+`fetchOgPreview` — never both, and a failing/throwing oEmbed call never falls through to the
+generic OG fetch (YouTube blocks that anyway; the failure resolves to no preview, same as every
+other failure case). A non-YouTube URL is untouched and goes through `fetchOgPreview` exactly as
+before. The whole fetch stays wrapped in the same try/catch as spec 004, so a preview failure can
+never surface past capture. `supabase/functions/telegram-webhook/index.ts` wires the real
+`fetchYouTubeOembed` import into `ctx`, next to `fetchOgPreview`.
+
+### Tests
+
+- `tests/youtube-oembed.test.js` — `isYouTubeUrl` against the 3 common forms plus
+  substring-over-match cases (`example.com/youtube.com/watch`, `notyoutube.com`); `fetchYouTubeOembed`
+  against a mocked oEmbed JSON response (`youtube.com/watch` and `youtu.be/` forms), the exact
+  encoded endpoint URL requested, a non-2xx response, a network error, a timeout, and a response
+  with no `title`.
+- `tests/webhook-handler.test.js` gained 5 cases: a YouTube link calls `fetchYouTubeOembed` and
+  never `fetchOgPreview`; a `youtu.be` short link routes the same way; a non-YouTube URL still
+  goes through `fetchOgPreview` untouched; a failing/null `fetchYouTubeOembed` writes no preview
+  and never falls through to `fetchOgPreview`; a throwing `fetchYouTubeOembed` never breaks
+  capture.
+- `evals/run.sh` — `spec006_unit_tests`, `spec006_no_ai_calls`.
+- Criterion 4 (live manual smoke test) is manual by design, same reasoning as every prior spec's
+  live-only criteria — checklist in `learnings/006-smoke-test.md`.
+
+### Deploying
+
+No migration, no new secret, no new dependency — this spec only adds
+`supabase/functions/_shared/youtube-oembed.js` and changes
+`supabase/functions/_shared/webhook-handler.js` + `supabase/functions/telegram-webhook/index.ts`:
+
+```
+supabase functions deploy telegram-webhook    # picks up the YouTube oEmbed path
+```
+
+`daily-push` is unaffected and does not need redeploying.
