@@ -256,3 +256,23 @@ fixture timestamps (the eval's own requirement).
 ("ayer" for yesterday, independent of how many hours ago that was) — that's a genuinely different
 semantic (local calendar date vs. elapsed duration) and would replace this function, not extend
 it.
+
+## 2026-10-26 · [005-dedupe-links] Duplicate check is a `select` before insert, not a unique constraint
+
+**What is decided**: `supabase/functions/_shared/db.js#findItemByLink(link)` runs a plain
+`select` (`items?link=eq.<link>&limit=1`, no `status` filter) before `insertItem` is ever called
+in the link-save path of `webhook-handler.js`. No unique constraint or index was added to the
+`items` table, and no insert-then-catch-the-conflict pattern was used.
+
+**Why**: the spec's delegated criterion was "whichever is simplest given the existing
+`_shared/db.js` patterns, no new dependency". Every other read in this file (`getPendingItems`,
+the implicit lookups behind triage) already follows the same `get`-then-decide shape, so adding
+one more `get`-wrapped query reuses a pattern this file already has, with no migration and no new
+Postgres object. A unique constraint would also change what "duplicate" means at the schema level
+for every future caller, including the daily push and any direct SQL access, when the spec's
+intent is scoped to this one capture path only.
+
+**What would invalidate it**: a second, concurrent capture path writing to `items.link` directly
+(bypassing this handler) — at that point a race between two near-simultaneous selects could still
+let two duplicates through, and only a real unique constraint closes that gap. Nothing in this
+product writes to `items` outside this one handler today.

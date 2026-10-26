@@ -14,6 +14,7 @@ export function makeFakeDb(fixture = {}) {
     uploadImage: [],
     getSignedUrl: [],
     updateItemPreview: [],
+    findItemByLink: [],
   };
 
   function freshId() {
@@ -54,6 +55,10 @@ export function makeFakeDb(fixture = {}) {
     async getSignedUrl(path) {
       calls.getSignedUrl.push(path);
       return `https://fake.supabase.co/storage/v1/object/sign/item-images/${path}?token=fake`;
+    },
+    async findItemByLink(link) {
+      calls.findItemByLink.push(link);
+      return state.items.find((i) => i.link === link) || null;
     },
     async updateItemPreview(itemId, preview) {
       calls.updateItemPreview.push({ itemId, preview });

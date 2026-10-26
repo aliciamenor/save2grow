@@ -370,3 +370,58 @@ cd web && python3 -m http.server 8787
 
 No new secrets, no new config-table rows — link previews use the same service-role key the
 webhook already writes with, and the GAPING restyle is static CSS/HTML/JS with no new env var.
+
+## Spec 005 — Don't save a link twice
+
+### What this adds
+
+Forwarding a link that's already saved — in any tab, including Borrados — no longer creates a
+second `items` row. The bot replies naming where the existing item currently sits instead of the
+normal "Guardado." confirmation.
+
+### Duplicate check (criteria 1, 2, 3)
+
+`supabase/functions/_shared/db.js#findItemByLink(link)` (delegated decision: a plain `select`
+before insert, not a unique constraint + conflict handling — simplest fit for this file's
+existing `get`-wrapper pattern, no new dependency): queries `items?link=eq.<link>&limit=1` with
+no `status` filter, so an item in any status counts as "already saved" (closed decision, Gate 1,
+2026-10-26). Returns the row or `null`.
+
+`supabase/functions/_shared/webhook-handler.js`'s link-save path calls it first, with the same
+trimmed message text used as the `link` value today (criterion 1's "trimmed URL string" is this
+file's existing link field, which is the whole trimmed message text, not just the matched URL
+substring — unchanged from spec 002). On a hit: sends
+`"Ya lo tienes guardado — está en <Pendientes|Recursos|Borrados>."` (via the new
+`TAB_LABEL_BY_STATUS` map and `duplicateReplyText`), returns `{action: "duplicate", item}`, skips
+`insertItem` and skips the OG-preview fetch entirely — no new row means nothing to attach a
+preview to. On a miss: falls through to the unchanged insert + "Guardado." + preview flow.
+
+The photo-handling branch is untouched (criterion 3) — `findItemByLink` is called only inside the
+link branch; detecting a duplicate image needs comparing file bytes/hashes, out of scope here
+(see the spec's "Out of scope" section).
+
+### Tests
+
+- `tests/webhook-handler.test.js` gained 4 cases: an exact duplicate skips the insert and replies
+  with the Pendientes label; the reply names the correct tab for all 3 statuses
+  (pending/resource/deleted); a non-matching link still saves normally (no false positive); a
+  duplicate never calls `fetchOgPreview`. Spec 002's existing photo tests pass unmodified
+  (criterion 3, implicit).
+- `tests/fakes.js`'s fake db gained `findItemByLink`, matching on `link` string equality against
+  its in-memory `state.items`, same case-sensitive exact-match semantics as the real PostgREST
+  query.
+- `evals/run.sh` — `spec005_unit_tests`, `spec005_photo_path_untouched` (structural check that
+  `findItemByLink` isn't called inside the photo branch), `spec005_no_ai_calls`.
+- Criterion 5 (live manual smoke test) is manual by design, same reasoning as every prior spec's
+  live-only criteria — checklist in `learnings/005-smoke-test.md`.
+
+### Deploying
+
+No migration, no new secret, no new dependency — this spec only changes
+`supabase/functions/_shared/db.js` and `supabase/functions/_shared/webhook-handler.js`:
+
+```
+supabase functions deploy telegram-webhook    # picks up the duplicate check
+```
+
+`daily-push` is unaffected and does not need redeploying.

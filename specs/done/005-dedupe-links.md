@@ -1,5 +1,5 @@
 ---
-status: pendiente
+status: implementada
 depends_on: []
 ---
 
@@ -72,3 +72,40 @@ exposure as every other spec in this product.
   cosmetically-different URLs that are really the same page.
 - Duplicate detection for photos → only if this becomes a real nuisance; needs image hashing, a
   meaningfully bigger piece of work than this spec.
+
+## Evidence (filled in by the implementing agent, 2026-10-26)
+
+All automated evals pass — `evals/run.sh` output below (`node --test` → 59 tests, 0 failures):
+
+```
+PASS 005.1-2 unit tests (duplicate link skips insert, reply names current tab)
+PASS 005.3 duplicate check is not wired into the photo-handling branch (photos out of scope)
+PASS 005.4 no AI/LLM import in supabase/functions, web, or src
+16 pass · 0 fail  (all specs 001-005 combined)
+```
+
+Per criterion:
+
+1. **No new row on an exact duplicate.** `supabase/functions/_shared/db.js#findItemByLink`
+   (`select` before insert, delegated decision — see `decisions.md`, 2026-10-26) called from
+   `webhook-handler.js`'s link branch before `insertItem`; on a hit, `insertItem` is never
+   called. Unit tested: `tests/webhook-handler.test.js`, "spec005 criterion 1: an exact duplicate
+   link does not insert a new row" — asserts `calls.insertItem.length === 0`. Matches regardless
+   of the existing item's status (no `status` filter in the query), per the closed decision.
+2. **Reply names the existing item's actual tab.** `TAB_LABEL_BY_STATUS` +
+   `duplicateReplyText` in `webhook-handler.js`. Unit tested across all 3 statuses: "spec005
+   criterion 2: the duplicate reply names the item's actual current status/tab" — pending →
+   "Pendientes", resource → "Recursos", deleted → "Borrados". A non-matching link still gets the
+   normal "Guardado." (own test, no false positive).
+3. **Photos untouched.** `findItemByLink` is called only inside the link branch of
+   `handleMessage`, never the photo branch — structural check `spec005_photo_path_untouched` in
+   `evals/run.sh`. Spec 002's existing photo tests ("criterion 2: a photo message downloads the
+   largest size and saves it", "criterion 4: triage works the same on an image item") pass
+   unmodified in the same `node --test` run.
+4. **No AI calls.** `spec005_no_ai_calls`, same grep as every prior spec.
+5. **Manual smoke test.** Not run by this agent — needs a live deploy (webhook redeployed) and a
+   real forwarded link already saved earlier. Checklist: `learnings/005-smoke-test.md`, status
+   **not yet run**.
+
+**Open after this agent's work**: criterion 5's live checklist in `learnings/005-smoke-test.md`.
+Branch: `worktree-agent-a0dd19a3de400b17b`, ready for Gate 2 (`scripts/merge-if-green.sh`).
