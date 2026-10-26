@@ -224,5 +224,49 @@ spec004_gaping_tokens
 spec004_triage_icons_not_text_buttons
 spec004_no_ai_calls
 
+# --- 005-dedupe-links -------------------------------------------------------
+
+spec005_unit_tests() {
+  # Criteria 1, 2 — unit tests under tests/webhook-handler.test.js (exact-duplicate skips the
+  # insert and names the existing item's tab; a non-matching link still saves; a duplicate never
+  # triggers the OG-preview fetch). Same `node --test` run as every other spec, named as its own
+  # eval so this criterion is traceable.
+  if node --test 2>&1 | tee /tmp/save2grow-005-test-output.txt | grep -q '^ℹ fail 0$'; then
+    ok "005.1-2 unit tests (duplicate link skips insert, reply names current tab)"
+  else
+    ko "005.1-2 unit tests (duplicate link skips insert, reply names current tab)"
+    ev "see /tmp/save2grow-005-test-output.txt"
+  fi
+}
+
+spec005_photo_path_untouched() {
+  # Criterion 3 — photos are out of scope: the photo-handling branch in webhook-handler.js is
+  # unchanged, and spec 002's own photo tests ("criterion 2: a photo message downloads the
+  # largest size and saves it", "criterion 4: triage works the same on an image item") still pass
+  # unmodified as part of the same `node --test` run checked above. This function re-asserts the
+  # structural half: no `findItemByLink` call appears inside the photo branch of
+  # webhook-handler.js (it's scoped to the link branch only).
+  local f="supabase/functions/_shared/webhook-handler.js"
+  if awk '/message\.photo\)/,/^  }/' "$f" | grep -q "findItemByLink"; then
+    ko "005.3 duplicate check is not wired into the photo-handling branch"
+    ev "see $f"
+  else
+    ok "005.3 duplicate check is not wired into the photo-handling branch (photos out of scope)"
+  fi
+}
+
+spec005_no_ai_calls() {
+  # Criterion 4 — same check as every prior spec, unchanged, re-run as its own named eval.
+  if grep -rE "anthropic|openai|@anthropic-ai" supabase/functions web src 2>/dev/null | grep -v '^Binary' | grep -q .; then
+    ko "005.4 no AI/LLM import in supabase/functions, web, or src"
+  else
+    ok "005.4 no AI/LLM import in supabase/functions, web, or src"
+  fi
+}
+
+spec005_unit_tests
+spec005_photo_path_untouched
+spec005_no_ai_calls
+
 printf '%s pass · %s fail\n' "$passed" "$failed"
 [ "$failed" = "0" ]

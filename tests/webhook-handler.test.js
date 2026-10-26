@@ -258,6 +258,89 @@ test("spec004 criterion 4: omitting fetchOgPreview entirely still saves the link
   assert.equal(calls.updateItemPreview.length, 0);
 });
 
+// Spec 005 criteria 1, 2: forwarding a link that exactly matches an existing item's `link`
+// (any status) skips the insert and replies naming where it already sits.
+test("spec005 criterion 1: an exact duplicate link does not insert a new row", async () => {
+  const { db, calls } = makeFakeDb({
+    items: [
+      { id: 50, chat_id: 42, link: "https://example.com/already-saved", status: "pending", created_at: "2026-01-01" },
+    ],
+  });
+  const { telegram, sentMessages } = makeFakeTelegram();
+
+  const result = await handleUpdate(
+    { message: { chat: { id: 42 }, from: { id: 999 }, text: "https://example.com/already-saved" } },
+    { db, telegram }
+  );
+
+  assert.equal(result.action, "duplicate");
+  assert.equal(calls.insertItem.length, 0); // no new row
+  assert.equal(sentMessages.length, 1);
+  assert.equal(sentMessages[0].text, "Ya lo tienes guardado — está en Pendientes.");
+});
+
+test("spec005 criterion 2: the duplicate reply names the item's actual current status/tab", async () => {
+  const cases = [
+    { status: "pending", label: "Pendientes" },
+    { status: "resource", label: "Recursos" },
+    { status: "deleted", label: "Borrados" },
+  ];
+
+  for (const { status, label } of cases) {
+    const { db, calls } = makeFakeDb({
+      items: [{ id: 51, chat_id: 42, link: "https://example.com/dup", status, created_at: "2026-01-01" }],
+    });
+    const { telegram, sentMessages } = makeFakeTelegram();
+
+    const result = await handleUpdate(
+      { message: { chat: { id: 42 }, from: { id: 999 }, text: "https://example.com/dup" } },
+      { db, telegram }
+    );
+
+    assert.equal(result.action, "duplicate");
+    assert.equal(calls.insertItem.length, 0);
+    assert.equal(sentMessages[0].text, `Ya lo tienes guardado — está en ${label}.`);
+  }
+});
+
+test("spec005: a non-matching link still saves normally (no false-positive duplicate)", async () => {
+  const { db, calls } = makeFakeDb({
+    items: [{ id: 52, chat_id: 42, link: "https://example.com/other", status: "pending", created_at: "2026-01-01" }],
+  });
+  const { telegram, sentMessages } = makeFakeTelegram();
+
+  const result = await handleUpdate(
+    { message: { chat: { id: 42 }, from: { id: 999 }, text: "https://example.com/not-the-same" } },
+    { db, telegram }
+  );
+
+  assert.equal(result.action, "item_saved");
+  assert.equal(calls.insertItem.length, 1);
+  assert.equal(sentMessages[0].text, "Guardado.");
+});
+
+test("spec005: a duplicate link never triggers an OG preview fetch", async () => {
+  const { db, calls } = makeFakeDb({
+    items: [{ id: 53, chat_id: 42, link: "https://example.com/dup2", status: "pending", created_at: "2026-01-01" }],
+  });
+  const { telegram, sentMessages } = makeFakeTelegram();
+  let called = false;
+  const fetchOgPreview = async () => {
+    called = true;
+    return null;
+  };
+
+  const result = await handleUpdate(
+    { message: { chat: { id: 42 }, from: { id: 999 }, text: "https://example.com/dup2" } },
+    { db, telegram, fetchOgPreview }
+  );
+
+  assert.equal(result.action, "duplicate");
+  assert.equal(called, false);
+  assert.equal(calls.updateItemPreview.length, 0);
+  assert.equal(sentMessages[0].text, "Ya lo tienes guardado — está en Pendientes.");
+});
+
 // Criterion 6: the objective-selection code path is gone from the live capture flow — no
 // `newobj:`/`obj:` callback handling and no `awaiting_objective_name` left wired.
 test("criterion 6: no objective-selection buttons are ever sent for a link or a photo", async () => {

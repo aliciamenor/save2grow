@@ -19,6 +19,19 @@ const TRIAGE_STATUS_BY_ACTION = {
 
 const CONFIRMATION_TEXT = "Guardado.";
 
+// Spec 005 criterion 2 — names where the existing item currently sits, instead of the normal
+// "Guardado." confirmation. Keys are `items.status` values, same 3 as the triage map above.
+const TAB_LABEL_BY_STATUS = {
+  pending: "Pendientes",
+  resource: "Recursos",
+  deleted: "Borrados",
+};
+
+function duplicateReplyText(existingItem) {
+  const label = TAB_LABEL_BY_STATUS[existingItem.status] || existingItem.status;
+  return `Ya lo tienes guardado — está en ${label}.`;
+}
+
 export async function handleUpdate(update, ctx) {
   const { db, telegram, onSenderId, fetchOgPreview } = ctx;
 
@@ -54,6 +67,15 @@ async function handleMessage(message, { db, telegram, onSenderId, fetchOgPreview
 
   // Criterion 1: forwarding a link saves it immediately, no objective prompt.
   if (URL_RE.test(text)) {
+    // Spec 005 criteria 1, 2: an exact match on the trimmed text against an existing item's
+    // `link` (any status — closed decision, Gate 1, 2026-10-26) skips the insert entirely and
+    // replies naming where the existing item currently sits, instead of "Guardado."
+    const existing = await db.findItemByLink(text);
+    if (existing) {
+      await telegram.sendMessage(chatId, duplicateReplyText(existing));
+      return { action: "duplicate", item: existing };
+    }
+
     const item = await db.insertItem({ chat_id: chatId, link: text, status: "pending" });
     await telegram.sendMessage(chatId, CONFIRMATION_TEXT);
     // Spec 004 criterion 4: fetch the Open Graph preview once, right after the confirmation

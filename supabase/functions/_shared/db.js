@@ -47,6 +47,16 @@ export function makeDb({ url, key }) {
       return post("items", { chat_id, link, image_path, status });
     },
 
+    // Spec 005 criterion 1 — a plain `select` before insert, the delegated decision's simplest
+    // option given this file's existing `get`-wrapper pattern (no new dependency, no unique
+    // constraint/conflict handling to add). Any status counts as "already saved" (closed
+    // decision, Gate 1, 2026-10-26), so the query has no `status` filter. `encodeURIComponent`
+    // guards the PostgREST query string against a link containing `&`/`=`/etc.
+    async findItemByLink(link) {
+      const rows = await get(`items?link=eq.${encodeURIComponent(link)}&limit=1`);
+      return rows[0] || null;
+    },
+
     // Criterion 3: oldest 3 pending items overall — objective is gone from this scope, so there
     // is no per-objective grouping left to select within.
     async getPendingItems(limit) {
