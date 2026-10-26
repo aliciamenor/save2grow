@@ -183,7 +183,7 @@ the logged-in page can call `createSignedUrl` as itself.
 Every policy's `using` clause is:
 
 ```sql
-auth.jwt() ->> 'email' = current_setting('app.allowed_owner_email', true)
+auth.jwt() ->> 'email' = (select value from app_config where key = 'allowed_owner_email')
 ```
 
 **Not** `auth.role() = 'authenticated'` alone — a stranger who requests their own magic link and
@@ -192,8 +192,13 @@ so they see zero rows and can update nothing (closed decision, Gate 1, 2026-10-2
 
 The allowed email is never a literal in this repo (stopping condition honored, same pattern as
 `OWNER_TELEGRAM_ID` in spec 001 — see `decisions.md`, 2026-10-25, and the 2026-10-26 entry for
-this spec). It's read from the Postgres session setting `app.allowed_owner_email`, set once per
-database — see "Deploying" below.
+this spec). **Correction, 2026-10-26**: the original design read it from a Postgres session
+setting (`current_setting('app.allowed_owner_email', true)`), set via `alter database ... set`.
+Supabase's managed Postgres denies that statement — not even the linked project's own connection
+has the privilege. `supabase/migrations/0004_app_config_table.sql` replaces it with a small
+`app_config(key, value)` table instead (RLS-enabled, readable by any authenticated user — the one
+row it holds is the same email every other policy already compares against, so reading it back
+leaks nothing new). See `decisions.md` for the full entry.
 
 ### Tests
 
@@ -213,7 +218,7 @@ database — see "Deploying" below.
 ### Deploying
 
 ```
-supabase db push                              # applies 0003_local_feed_auth.sql
+supabase db push                              # applies 0003_local_feed_auth.sql + 0004_app_config_table.sql
 supabase functions deploy telegram-webhook    # unchanged, redeploy only if spec 001/002 code moved
 supabase functions deploy daily-push          # same
 ```
@@ -221,16 +226,16 @@ supabase functions deploy daily-push          # same
 Then, outside the repo (not run by the implementing agent — same as every secret in this
 product):
 
-1. **Set the allowed-owner-email database setting.** In the Supabase SQL editor (or via `psql`),
-   run, once per database, with the real value of the `ALLOWED_OWNER_EMAIL` secret substituted in
-   (never committed):
+1. **Insert the allowed owner email into `app_config`.** Via the CLI (`supabase db query
+   --linked`) or the SQL editor, once per database, with the real value substituted in (never
+   committed):
    ```sql
-   alter database postgres set app.allowed_owner_email = '<value of ALLOWED_OWNER_EMAIL>';
+   insert into app_config (key, value) values ('allowed_owner_email', '<the real email>')
+   on conflict (key) do update set value = excluded.value;
    ```
-   New connections pick this up automatically; existing pooled connections may need a restart of
-   the connection pooler or a moment to cycle. This is the one piece of config the RLS policies in
-   `0003_local_feed_auth.sql` depend on — without it, `current_setting(...)` returns `null` and
-   every policy denies everyone, including Alis.
+   This is the one piece of config the RLS policies in `0003_local_feed_auth.sql` /
+   `0004_app_config_table.sql` depend on — without this row, every policy denies everyone,
+   including Alis.
 2. **Register the local redirect URL.** Supabase dashboard → Authentication → URL Configuration →
    add `http://localhost:8787/` to "Redirect URLs" (must match `web/js/config.js`'s
    `REDIRECT_URL` exactly, including the trailing slash). Without this, Supabase rejects the

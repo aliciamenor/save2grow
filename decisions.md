@@ -175,3 +175,25 @@ the frontend too.
 **What would invalidate it**: a future criterion that genuinely needs DOM behavior under test
 (e.g. keyboard navigation, focus management) — at that point a headless-DOM dependency gets added
 for that feature only, not as a blanket tooling change.
+
+## 2026-10-26 · [003-local-feed-with-auth] Allowed owner email lives in a table, not a Postgres GUC
+
+**What is decided**: `supabase/migrations/0004_app_config_table.sql` adds `app_config(key,
+value)`, RLS-enabled, readable by any authenticated user. The RLS policies on `items` and
+`storage.objects` now compare against `(select value from app_config where key =
+'allowed_owner_email')` instead of `current_setting('app.allowed_owner_email', true)`.
+
+**Why**: spec 003's original design (session GUC set via `alter database ... set`) failed at
+deploy — Supabase's managed Postgres returns "permission denied to set parameter" for that
+statement even on the linked project's own connection; it isn't a superuser role. A config table
+needs no elevated privilege, only an ordinary `insert`. Making the table world-readable to
+authenticated users is not a new exposure: its one row is the exact email every other policy
+already compares against, so a stranger reading it back learns nothing they couldn't already
+infer from being denied by every other policy.
+
+**Replaces**: the GUC-based design described in spec 003's own migration file and
+`ARCHITECTURE.md` as originally written (2026-10-26, same day, before this correction).
+
+**What would invalidate it**: moving to Supabase Vault for this value once this product holds
+more than one piece of app-wide config worth centralizing — a single-row table is the "boring and
+proven" choice at n=1, not necessarily at n=10.
