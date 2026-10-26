@@ -103,7 +103,22 @@ function buildCardEl(vm) {
   li.dataset.itemId = String(vm.id);
   li.className = "card";
 
-  li.appendChild(buildVisualEl(card.visual));
+  // The whole visual+text block is one link when the card has somewhere to go (any link kind —
+  // "link-preview" had no clickable element at all before this fix, "link-plain" already had one
+  // on its own text). Image items have no href and render unwrapped, same as before. The triage
+  // icons stay outside this anchor as siblings, never nested inside it (a button inside an <a>
+  // fires both actions on click).
+  const contentWrap = card.href
+    ? Object.assign(document.createElement("a"), {
+        className: "card-content-link",
+        href: card.href,
+        target: "_blank",
+        rel: "noopener noreferrer",
+      })
+    : document.createElement("div");
+  contentWrap.className = card.href ? "card-content-link" : "card-content";
+
+  contentWrap.appendChild(buildVisualEl(card.visual));
 
   const body = document.createElement("div");
   body.className = "card-body";
@@ -112,22 +127,12 @@ function buildCardEl(vm) {
     body.appendChild(Object.assign(document.createElement("p"), { className: "card-heading", textContent: card.heading }));
   }
   if (card.body) {
-    if (card.kind === "link-plain") {
-      body.appendChild(
-        Object.assign(document.createElement("a"), {
-          className: "card-text card-link",
-          href: card.href,
-          textContent: card.body,
-          target: "_blank",
-          rel: "noopener noreferrer",
-        }),
-      );
-    } else {
-      body.appendChild(Object.assign(document.createElement("p"), { className: "card-text", textContent: card.body }));
-    }
+    const bodyClass = card.kind === "link-plain" ? "card-text card-link" : "card-text";
+    body.appendChild(Object.assign(document.createElement("p"), { className: bodyClass, textContent: card.body }));
   }
   body.appendChild(Object.assign(document.createElement("span"), { className: "card-timestamp", textContent: card.timestamp }));
-  li.appendChild(body);
+  contentWrap.appendChild(body);
+  li.appendChild(contentWrap);
 
   const actions = document.createElement("div");
   actions.className = "card-actions";
