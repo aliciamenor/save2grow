@@ -64,12 +64,15 @@ async function handleMessage(message, { db, telegram, onSenderId, fetchOgPreview
     if (fetchOgPreview) {
       try {
         const matchedUrl = text.match(URL_RE);
+        console.log("og-preview: fetching", matchedUrl && matchedUrl[0]);
         const preview = matchedUrl ? await fetchOgPreview(matchedUrl[0]) : null;
+        console.log("og-preview: result", JSON.stringify(preview));
         if (preview) {
           await db.updateItemPreview(item.id, preview);
+          console.log("og-preview: saved to item", item.id);
         }
       } catch (err) {
-        console.error("link preview fetch failed:", err);
+        console.error("link preview fetch failed:", err, err && err.stack);
       }
     }
     return { action: "item_saved", item };
