@@ -9,7 +9,7 @@
 // (Project Settings → API → "anon public" key) before opening the page. See ARCHITECTURE.md,
 // "Spec 003 — Deploying", and learnings/003-smoke-test.md.
 export const SUPABASE_URL = "https://ganwkykfudvruvdlxlbm.supabase.co";
-export const SUPABASE_ANON_KEY = "REPLACE_WITH_ANON_PUBLIC_KEY";
+export const SUPABASE_ANON_KEY = "sb_publishable_5QsW1pgv_13rUqHsfMXoKg_Z6x097UI";
 
 // Must match exactly what is registered as a redirect URL in the Supabase dashboard
 // (Authentication → URL Configuration → Redirect URLs) and the port `evals/serve-check.sh` and
