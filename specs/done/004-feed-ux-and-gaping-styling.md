@@ -1,5 +1,5 @@
 ---
-status: pendiente
+status: implementada
 depends_on: []
 ---
 
@@ -177,3 +177,53 @@ that. No other external effect.
 - Highlights/pattern-detection across saved content (mentioned earlier as a Fase 3+ idea) → still
   there, untouched by this spec; link previews here are per-item metadata, not cross-item
   analysis.
+
+## Evidence (filled in by the implementing agent, 2026-10-26)
+
+All automated evals pass — `evals/run.sh` output below (also `tests/og-preview.test.js`,
+`tests/webhook-handler.test.js`, `tests/web-feed.test.js` directly: `node --test` → 55 tests, 0
+failures):
+
+```
+PASS 004.1-4 unit tests (triage-visibility, tabs/counts, relative time, OG fetch/parse, card render)
+PASS 004.4 migration adds preview_title/preview_description/preview_image_url to items
+PASS 004.6 GAPING hex tokens present, no invented red/danger color value
+PASS 004.6 triage actions are icon-only buttons, not spec 003's text-label buttons
+PASS 004.7 no AI/LLM import in supabase/functions, web, or src
+13 pass · 0 fail  (all specs 001-004 combined)
+```
+
+Per criterion:
+
+1. **Triage moves between tabs (never deletes from view).** `web/js/feed.js#remainsInTab`
+   (unit tested, all 3×3 tab × decision combinations including Borrados→Pendiente restore —
+   `tests/web-feed.test.js`); `web/js/app.js`'s click handler calls it to decide DOM removal.
+2. **3 tabs, Pendientes default, counts.** `web/js/feed.js#TABS`/`filterByTab`/`countsByTab`,
+   unit tested.
+3. **Relative time.** `web/js/feed.js#relativeTime`, unit tested with a fixed `now` and boundary
+   fixtures (see `decisions.md` for the bucketing scheme, a delegated decision).
+4. **Link previews.** Fetch/parse: `supabase/functions/_shared/og-preview.js`, unit tested
+   (full/partial/no tags, non-2xx, network error, timeout — all resolve correctly or `null`,
+   never throw). Schema: `supabase/migrations/0005_link_previews.sql` (static check,
+   `spec004_preview_schema`). Render: `web/js/feed.js#buildCard`, unit tested for the preview
+   card and the plain-link fallback.
+5. **One shared card shape.** `buildCard` produces the same `{kind, visual, heading, body, href,
+   timestamp}` structure for all 3 content kinds — verified by the same render tests as
+   criterion 4.
+6. **GAPING styling.** `web/css/style.css` tokens — automated: `spec004_gaping_tokens` (exact hex
+   values present, no invented red/danger value) and `spec004_triage_icons_not_text_buttons`
+   (spec 003's text-label buttons gone). Visual rubric itself (card layout, fonts, colors reading
+   right) — manually verified in-session via a same-origin fixture page rendering `buildCard`'s
+   output through the real `web/js/app.js`/`style.css` logic in the browser pane (screenshot
+   evidence reviewed during implementation, not committed to the repo); still needs Alis's own
+   confirmation against the live feed per criterion 8.
+7. **No AI calls.** `spec004_no_ai_calls`, extended grep over `supabase/functions`, `web`, `src`.
+8. **Manual smoke test.** Not run by this agent — needs a live deploy (migration pushed, webhook
+   redeployed, local server restarted) and a real forwarded link. Checklist:
+   `learnings/004-smoke-test.md`, status **not yet run**.
+
+**Open after this agent's work**: criterion 8's live checklist in
+`learnings/004-smoke-test.md`, which also carries the live confirmation of criterion 6's visual
+rubric against the real deployed page (the in-session browser check above used fixture data, not
+a live Supabase session). Branch: `worktree-agent-a62d19c63ca8354d9`, ready for Gate 2
+(`scripts/merge-if-green.sh`).

@@ -13,6 +13,7 @@ export function makeFakeDb(fixture = {}) {
     updateItemStatus: [],
     uploadImage: [],
     getSignedUrl: [],
+    updateItemPreview: [],
   };
 
   function freshId() {
@@ -53,6 +54,16 @@ export function makeFakeDb(fixture = {}) {
     async getSignedUrl(path) {
       calls.getSignedUrl.push(path);
       return `https://fake.supabase.co/storage/v1/object/sign/item-images/${path}?token=fake`;
+    },
+    async updateItemPreview(itemId, preview) {
+      calls.updateItemPreview.push({ itemId, preview });
+      const item = state.items.find((i) => String(i.id) === String(itemId));
+      if (item) {
+        item.preview_title = preview.title ?? null;
+        item.preview_description = preview.description ?? null;
+        item.preview_image_url = preview.image ?? null;
+      }
+      return item;
     },
   };
 

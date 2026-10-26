@@ -20,10 +20,10 @@ const TRIAGE_STATUS_BY_ACTION = {
 const CONFIRMATION_TEXT = "Guardado.";
 
 export async function handleUpdate(update, ctx) {
-  const { db, telegram, onSenderId } = ctx;
+  const { db, telegram, onSenderId, fetchOgPreview } = ctx;
 
   if (update.message) {
-    return handleMessage(update.message, { db, telegram, onSenderId });
+    return handleMessage(update.message, { db, telegram, onSenderId, fetchOgPreview });
   }
 
   if (update.callback_query) {
@@ -33,7 +33,7 @@ export async function handleUpdate(update, ctx) {
   return { action: "unhandled" };
 }
 
-async function handleMessage(message, { db, telegram, onSenderId }) {
+async function handleMessage(message, { db, telegram, onSenderId, fetchOgPreview }) {
   const chatId = message.chat.id;
   if (onSenderId) onSenderId(message.from && message.from.id);
 
@@ -56,6 +56,22 @@ async function handleMessage(message, { db, telegram, onSenderId }) {
   if (URL_RE.test(text)) {
     const item = await db.insertItem({ chat_id: chatId, link: text, status: "pending" });
     await telegram.sendMessage(chatId, CONFIRMATION_TEXT);
+    // Spec 004 criterion 4: fetch the Open Graph preview once, right after the confirmation
+    // reply — never blocking or breaking capture itself. `fetchOgPreview` is optional (older
+    // callers, and most unit tests above, omit it); a fetch/parse failure already resolves to
+    // `null` inside og-preview.js, and the try/catch here is a second line of defense so nothing
+    // from this best-effort step can ever surface past the capture flow.
+    if (fetchOgPreview) {
+      try {
+        const matchedUrl = text.match(URL_RE);
+        const preview = matchedUrl ? await fetchOgPreview(matchedUrl[0]) : null;
+        if (preview) {
+          await db.updateItemPreview(item.id, preview);
+        }
+      } catch (err) {
+        console.error("link preview fetch failed:", err);
+      }
+    }
     return { action: "item_saved", item };
   }
 

@@ -133,5 +133,96 @@ spec003_unit_tests
 spec003_rls_policy
 spec003_no_ai_calls
 
+# --- 004-feed-ux-and-gaping-styling ----------------------------------------
+
+spec004_unit_tests() {
+  # Criteria 1 (triage-visibility, extracted to feed.js's remainsInTab), 2 (tabs/counts), 3
+  # (relative time), 4 (OG fetch/parse + render), 5 (shared card shape) — same `node --test` run
+  # as every other spec (no path filter — Node's test runner finds every *.test.js under tests/
+  # on its own), named here as its own eval so each criterion is traceable.
+  if node --test 2>&1 | tee /tmp/save2grow-004-test-output.txt | grep -q '^ℹ fail 0$'; then
+    ok "004.1-4 unit tests (triage-visibility, tabs/counts, relative time, OG fetch/parse, card render)"
+  else
+    ko "004.1-4 unit tests (triage-visibility, tabs/counts, relative time, OG fetch/parse, card render)"
+    ev "see /tmp/save2grow-004-test-output.txt"
+  fi
+}
+
+spec004_preview_schema() {
+  # Criterion 4 (schema eval) — migration-presence check: a migration adds the 3 nullable
+  # preview columns to `items`. No local Postgres/Docker and no live Supabase credentials are
+  # available to this agent (same constraint as spec003_rls_policy), so this is a static check
+  # of the migration file's SQL, not a live `supabase db diff`.
+  local f
+  f="$(ls supabase/migrations/0005_*.sql 2>/dev/null | head -1)"
+  if [ -z "$f" ]; then
+    ko "004.4 migration adds preview_title/preview_description/preview_image_url to items"
+    ev "no supabase/migrations/0005_*.sql found"
+    return
+  fi
+  if grep -q "preview_title" "$f" && grep -q "preview_description" "$f" && grep -q "preview_image_url" "$f"; then
+    ok "004.4 migration adds preview_title/preview_description/preview_image_url to items"
+  else
+    ko "004.4 migration adds preview_title/preview_description/preview_image_url to items"
+    ev "see $f"
+  fi
+}
+
+spec004_gaping_tokens() {
+  # Criterion 6 (agent's own pre-handoff check) — the exact GAPING hex values are present in the
+  # stylesheet, and no red/danger value was invented. The red check only inspects actual CSS
+  # color values (a hex red, or `: red`/`red;` as a declared value), not a substring match over
+  # the whole repo — "REDIRECT_URL" and "required" both contain the letters "red" harmlessly.
+  local css="web/css/style.css"
+  local tokens=("#f9fafb" "#ffffff" "#e5e7eb" "#1f2937" "#4b5563" "#6b7280" "#42767f" "#2f5860" "#10b981")
+  local missing=""
+  for t in "${tokens[@]}"; do
+    grep -q -- "$t" "$css" || missing="$missing $t"
+  done
+  if [ -n "$missing" ]; then
+    ko "004.6 GAPING hex tokens present in web/css/style.css"
+    ev "missing:$missing"
+    return
+  fi
+  if grep -nEi '#f00\b|#ff0000|:[[:space:]]*red[[:space:]]*;' "$css" | grep -q .; then
+    ko "004.6 no invented red/danger color value in web/css/style.css"
+    ev "see $css"
+    return
+  fi
+  ok "004.6 GAPING hex tokens present, no invented red/danger color value"
+}
+
+spec004_triage_icons_not_text_buttons() {
+  # Criterion 6 (agent's own pre-handoff check) — the spec 003 text-label triage buttons
+  # ("Borrar", "Guardar como recurso", "Pendiente" as visible button text) were replaced by
+  # icon-only buttons, not left duplicated. Checks that no `button.textContent` assignment in
+  # app.js sets one of those 3 exact strings — the tab label ("Pendientes", plural, via
+  # `tab.label`) and the icons' `aria-label`/`title` values are a different thing on purpose and
+  # are not matched by this check.
+  if grep -n 'textContent' web/js/app.js \
+    | grep -E '"Borrar"|"Guardar como recurso"|"Pendiente"' | grep -q .; then
+    ko "004.6 triage actions are icon-only buttons, not spec 003's text-label buttons"
+    ev "see web/js/app.js"
+  else
+    ok "004.6 triage actions are icon-only buttons, not spec 003's text-label buttons"
+  fi
+}
+
+spec004_no_ai_calls() {
+  # Criterion 7 — same check as spec001/002/003, re-run over the files this spec adds
+  # (og-preview.js, app.js, feed.js already covered by the directory-wide grep below).
+  if grep -rE "anthropic|openai|@anthropic-ai" supabase/functions web src 2>/dev/null | grep -v '^Binary' | grep -q .; then
+    ko "004.7 no AI/LLM import in supabase/functions, web, or src"
+  else
+    ok "004.7 no AI/LLM import in supabase/functions, web, or src"
+  fi
+}
+
+spec004_unit_tests
+spec004_preview_schema
+spec004_gaping_tokens
+spec004_triage_icons_not_text_buttons
+spec004_no_ai_calls
+
 printf '%s pass · %s fail\n' "$passed" "$failed"
 [ "$failed" = "0" ]

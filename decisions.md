@@ -197,3 +197,62 @@ infer from being denied by every other policy.
 **What would invalidate it**: moving to Supabase Vault for this value once this product holds
 more than one piece of app-wide config worth centralizing — a single-row table is the "boring and
 proven" choice at n=1, not necessarily at n=10.
+
+## 2026-10-26 · [004-feed-ux-and-gaping-styling] Triage never deletes — 3 tabs, each triage icon just moves an item between them
+
+**What is decided**: `items.status` ∈ {`pending`, `resource`, `deleted`} now maps 1:1 to 3 feed
+tabs (Pendientes / Recursos / Borrados). Every item in every tab keeps the same 3 triage icons;
+tapping any of them is the same `triageItem` call regardless of which tab the item started in,
+including restoring an item from Borrados via the "Pendiente" icon.
+
+**Why**: the live bug this spec fixes was exactly this gap — "Borrar" wrote `status='deleted'`
+correctly but the UI gave no visible sign anything happened, since spec 003's single list kept
+showing every status in place. Making Borrados a real, reversible tab (closed by Alis at Gate 1)
+means the fix and the UX rework are the same change: moving tabs *is* the visible feedback, and
+"undo" needs no separate feature because it's the same triage action from a different starting
+tab.
+
+**What would invalidate it**: a future request for actual, permanent deletion (out of scope,
+named explicitly in the spec) — at that point a 4th status or a real `delete` would need its own
+irreversible-action confirmation, on top of this reversible triage.
+
+## 2026-10-26 · [004-feed-ux-and-gaping-styling] Open Graph previews: plain regex over `<meta>` tags, no HTML-parsing dependency
+
+**What is decided**: `supabase/functions/_shared/og-preview.js#parseOgTags` matches
+`<meta property="og:title|og:description|og:image" content="…">` (either attribute order) with
+regular expressions, not an HTML parsing library. `fetchOgPreview` wraps the fetch in a
+4000ms (`OG_FETCH_TIMEOUT_MS`) `AbortController` timeout and resolves `null` — never throws — on
+any failure: non-2xx, network error, timeout, or no matching tags.
+
+**Why**: the spec's delegated criterion was zero npm dependencies if reasonably achievable,
+matching this repo's established pattern (see the 2026-10-25 runtime decision above). OG tags are
+a fixed, simple `<meta>` shape; a regex that accepts both attribute orders is reliable enough for
+that one shape without pulling in a general HTML parser, which nothing else in this repo needs
+either. 4 seconds was picked as "a few seconds at most" per the spec's own criterion: long enough
+that a normal page's TTFB doesn't trip it, short enough that Alis's "Guardado." reply is never
+meaningfully delayed by a link preview most of the time she'll never watch load.
+
+**What would invalidate it**: a site whose OG tags are injected by client-side JavaScript (so the
+raw HTML this fetcher sees never contains them) — at that point either falling back to the plain
+link stays correct behavior (nothing here promises every page gets a preview) or, if that becomes
+unacceptably common, a headless-render dependency would need its own spec, not a silent addition
+here.
+
+## 2026-10-26 · [004-feed-ux-and-gaping-styling] "hoy"/"hace N …" buckets by elapsed duration, not calendar-day boundaries
+
+**What is decided**: `web/js/feed.js#relativeTime(createdAt, now)` buckets strictly by elapsed
+milliseconds since `created_at`, in this order: under 1 minute → `"hoy"`; under 60 minutes →
+`"hace N minutos"`; under 24 hours → `"hace N horas"`; under 7 days → `"hace N días"`; otherwise
+→ `"hace N semanas"`. It does not look at calendar-day boundaries (e.g. "earlier today" vs.
+"yesterday" at local midnight).
+
+**Why**: the spec gave 3 example output strings (`"hace 2 días"`, `"hace 3 horas"`, `"hoy"`) but
+left the exact bucketing mechanism unstated. A pure duration-based scheme is the simplest
+internally-consistent reading that reproduces all 3 examples without adding timezone/calendar-day
+logic nothing else in this spec needs, and it's trivially unit-testable with a fixed `now` and
+fixture timestamps (the eval's own requirement).
+
+**What would invalidate it**: a future request that specifically wants calendar-relative language
+("ayer" for yesterday, independent of how many hours ago that was) — that's a genuinely different
+semantic (local calendar date vs. elapsed duration) and would replace this function, not extend
+it.
