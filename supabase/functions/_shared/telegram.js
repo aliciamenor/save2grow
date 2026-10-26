@@ -10,7 +10,15 @@ export function makeTelegram(token) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    return res.json();
+    const json = await res.json();
+    if (!json.ok) {
+      // Telegram's API returns 200 with {ok:false, description:...} on most call errors — an
+      // HTTP-status-only check would miss this. Surface it loudly instead of returning silently,
+      // so a bad reply_markup or stale token shows up in the function logs instead of just
+      // "nothing happened" on the user's end.
+      console.error(`telegram API error on ${method}:`, JSON.stringify(json));
+    }
+    return json;
   }
 
   return {
