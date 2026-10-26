@@ -250,3 +250,123 @@ product):
    then open `http://localhost:8787/` in a browser. Port 8787 is the one documented and tested
    port — if Alis uses a different port, step 2's redirect URL and `REDIRECT_URL` in
    `config.js` must both change to match.
+
+## Spec 004 — Feed UX overhaul: Instagram-style cards, 3 tabs, link previews, GAPING styling
+
+### What this fixes and adds
+
+Fixes the live bug confirmed after spec 003's deploy: "Borrar" correctly wrote `status='deleted'`
+but the item stayed visible, merely relabeled. Spec 004 restructures triage into 3 real tabs
+(Pendientes / Recursos / Borrados) where any of the 3 triage icons just moves the item between
+tabs — nothing is ever hidden forever, so "Borrar" now visibly does something and is reversible
+the exact same way as any other triage action. It also adds Open Graph link previews fetched at
+capture time, and restyles the whole page with Alis's GAPING design tokens (light theme only).
+
+### Database
+
+`supabase/migrations/0005_link_previews.sql` adds 3 nullable columns to `items`:
+`preview_title`, `preview_description`, `preview_image_url`. All three stay null for an image
+item, a link with no OG tags, or a failed/timed-out fetch.
+
+### Link previews (criterion 4)
+
+`supabase/functions/_shared/og-preview.js` — pure fetch + parse, same collaborator-injection
+shape as the rest of `_shared/`:
+
+- `parseOgTags(html)`: regex over `<meta property="og:…" content="…">` (either attribute order),
+  zero HTML-parsing dependency (delegated decision, see `decisions.md`). Never throws; a
+  malformed fragment just yields `{title: null, description: null, image: null}`.
+- `fetchOgPreview(url, {fetchImpl, timeoutMs})`: fetches with an `AbortController`-backed
+  timeout (`OG_FETCH_TIMEOUT_MS = 4000`), parses the HTML, and resolves `null` — never
+  throws — on a non-2xx response, a network error, a timeout, or a page with none of the 3 OG
+  tags. `fetchImpl` defaults to the global `fetch`, swapped for a mock in tests.
+
+`supabase/functions/_shared/webhook-handler.js`'s link-save path now takes an optional
+`ctx.fetchOgPreview`: right after the existing `"Guardado."` reply, it fetches the preview for
+the matched URL and, if any field came back non-null, writes it via the new
+`db.js#updateItemPreview(itemId, {title, description, image})`. Wrapped in its own try/catch as
+a second line of defense (`og-preview.js` already resolves `null` instead of throwing) — a
+preview failure can never surface past capture. Omitting `ctx.fetchOgPreview` entirely (older
+callers) skips the step with no error. `supabase/functions/telegram-webhook/index.ts` wires the
+real `fetchOgPreview` import into `ctx`.
+
+### Frontend — tabs, cards, relative time (criteria 1, 2, 3, 5)
+
+`web/js/feed.js` (pure, DOM-free, unit tested) gained:
+
+- `TABS` / `filterByTab(viewModels, tabKey)` / `countsByTab(viewModels)` (criterion 2):
+  Pendientes is first (the default tab); counts are read off the same view models as the
+  filtered lists, so they can never disagree.
+- `relativeTime(createdAt, now)` (criterion 3): elapsed-duration buckets, delegated decision
+  recorded in `decisions.md` — under a minute reads as `"hoy"`, then `"hace N minutos"`,
+  `"hace N horas"`, `"hace N días"`, `"hace N semanas"`.
+- `buildCard(viewModel, now)` (criteria 4, 5): one pure function builds the same
+  `{kind, visual, heading, body, href, timestamp}` shape for all 3 content kinds
+  (`link-preview`, `link-plain`, `image`) — only the `visual`/`heading`/`body` slots differ, so
+  `app.js` renders one shared card component, not three unrelated layouts. `visual.type` is
+  `"image"` or `"placeholder"` (the neutral block for a plain link with no OG image — delegated
+  decision: `surface`/`border` tokens, not a broken-image icon).
+- `remainsInTab(newStatus, currentTabKey)` (criterion 1): the one piece of the triage-click
+  decision that is DOM-adjacent, extracted here (same split as the rest of this file) so it is
+  unit tested without a DOM — `app.js`'s click handler calls it right after `applyTriageResult`
+  to decide whether to remove the item's card from the current tab's list. All 3×3
+  tab-and-decision combinations are exercised, including the Borrados→Pendiente restore case
+  (`tests/web-feed.test.js`).
+- `fetchFeed` now also resolves each link item's `preview` (`null`, or
+  `{title, description, image}` from the 3 new columns).
+
+`web/js/app.js` (DOM wiring, not unit tested — same convention as the rest of this file and
+`index.ts`) renders the 3 tabs, builds each visible card from `buildCard`'s output, and wires the
+3 icon-only triage buttons (trash / heart / clock, inline SVG, no icon-library dependency —
+delegated decision). On a triage click: calls `triageItem` + `applyTriageResult` as before, then
+`remainsInTab` — if false, removes just that card's DOM node (`li.remove()`), no full re-render,
+no page reload.
+
+### GAPING styling (criterion 6)
+
+`web/css/style.css` — every token from the spec's inlined palette as a CSS custom property under
+`:root` (light theme only; dark theme out of scope — see the spec's "Out of scope" section).
+`web/index.html` loads Space Grotesk (headings) and Inter (body) from Google Fonts. The 3 triage
+icons: trash (`icon-delete`, `ink-muted` — GAPING has no danger token, so "Borrar" is never red),
+heart (`icon-resource`, `eje-impacto` green), clock (`icon-pending`, `brand` teal), each with an
+`aria-label` naming the action in Spanish.
+
+### Tests
+
+- `tests/og-preview.test.js` — `parseOgTags`/`fetchOgPreview` against mock HTML responses: full
+  tags, partial tags, no tags, a non-2xx response, a network error, and a timeout (criterion 4,
+  fetch/parse eval).
+- `tests/webhook-handler.test.js` gained 5 cases for the preview wiring: a link fetches and
+  stores its preview, a `null` result writes nothing, a throwing fetcher never breaks capture, a
+  photo message never calls the fetcher, and omitting `ctx.fetchOgPreview` is still safe
+  (back-compat with spec 001–003's existing tests, which don't pass it).
+- `tests/web-feed.test.js` gained cases for `filterByTab`/`countsByTab`, `relativeTime`'s
+  boundary cases, `buildCard`'s 3 content kinds (plus the preview-text-without-image fallback to
+  `placeholder`), `fetchFeed`'s new `preview` field, and all 9 triage-from-every-tab combinations
+  against `remainsInTab` (criterion 1).
+- `evals/run.sh` — `spec004_unit_tests`, `spec004_preview_schema` (static migration-presence
+  check, same reasoning as `spec003_rls_policy`: no local Postgres/Docker or live Supabase
+  credentials available to this agent), `spec004_gaping_tokens` (greps `web/css/style.css` for
+  the exact hex values and for any invented red/danger CSS value — narrowly, not a
+  whole-repo substring match, since "REDIRECT_URL"/"required" both contain the letters "red"),
+  `spec004_triage_icons_not_text_buttons` (confirms no `button.textContent` in `app.js` is still
+  set to spec 003's 3 text-label strings), `spec004_no_ai_calls`.
+- Criterion 8 (live manual smoke test) is manual by design, same reasoning as every prior spec's
+  live-only criteria — checklist in `learnings/004-smoke-test.md`.
+
+### Deploying
+
+```
+supabase db push                              # applies 0005_link_previews.sql
+supabase functions deploy telegram-webhook    # picks up the OG-preview wiring
+supabase functions deploy daily-push          # unchanged, redeploy only if its code moved
+```
+
+Then restart the local server so it serves the new `web/` files:
+
+```
+cd web && python3 -m http.server 8787
+```
+
+No new secrets, no new config-table rows — link previews use the same service-role key the
+webhook already writes with, and the GAPING restyle is static CSS/HTML/JS with no new env var.

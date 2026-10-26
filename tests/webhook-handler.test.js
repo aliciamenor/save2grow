@@ -161,6 +161,103 @@ test("logs the sender id via onSenderId without blocking the flow", async () => 
   assert.equal(sentMessages.length, 1); // not blocked
 });
 
+// Spec 004 criterion 4: the OG preview is fetched once, right after "Guardado.", and written to
+// the new preview fields — only for a link item, and only when `fetchOgPreview` is supplied.
+test("spec004 criterion 4: a saved link fetches and stores its OG preview", async () => {
+  const { db, calls } = makeFakeDb();
+  const { telegram, sentMessages } = makeFakeTelegram();
+  const seenUrls = [];
+  const fetchOgPreview = async (url) => {
+    seenUrls.push(url);
+    return { title: "A title", description: "A description", image: "https://cdn.example/a.jpg" };
+  };
+
+  const update = {
+    message: { chat: { id: 42 }, from: { id: 999 }, text: "mira esto https://example.com/article" },
+  };
+
+  const result = await handleUpdate(update, { db, telegram, fetchOgPreview });
+
+  assert.equal(result.action, "item_saved");
+  assert.deepEqual(seenUrls, ["https://example.com/article"]); // just the URL, not surrounding text
+  assert.equal(sentMessages[0].text, "Guardado."); // reply still happens, unaffected
+  assert.equal(calls.updateItemPreview.length, 1);
+  assert.deepEqual(calls.updateItemPreview[0].preview, {
+    title: "A title",
+    description: "A description",
+    image: "https://cdn.example/a.jpg",
+  });
+});
+
+test("spec004 criterion 4: no OG tags (fetchOgPreview resolves null) — no preview write, capture unaffected", async () => {
+  const { db, calls } = makeFakeDb();
+  const { telegram, sentMessages } = makeFakeTelegram();
+  const fetchOgPreview = async () => null;
+
+  const result = await handleUpdate(
+    { message: { chat: { id: 42 }, from: { id: 999 }, text: "https://example.com/plain" } },
+    { db, telegram, fetchOgPreview },
+  );
+
+  assert.equal(result.action, "item_saved");
+  assert.equal(sentMessages[0].text, "Guardado.");
+  assert.equal(calls.updateItemPreview.length, 0);
+});
+
+test("spec004 criterion 4: a throwing fetchOgPreview never breaks capture", async () => {
+  const { db, calls } = makeFakeDb();
+  const { telegram, sentMessages } = makeFakeTelegram();
+  const fetchOgPreview = async () => {
+    throw new Error("boom");
+  };
+
+  const result = await handleUpdate(
+    { message: { chat: { id: 42 }, from: { id: 999 }, text: "https://example.com/boom" } },
+    { db, telegram, fetchOgPreview },
+  );
+
+  assert.equal(result.action, "item_saved");
+  assert.equal(sentMessages[0].text, "Guardado.");
+  assert.equal(calls.updateItemPreview.length, 0);
+});
+
+test("spec004 criterion 4: a photo message never calls fetchOgPreview", async () => {
+  const { db } = makeFakeDb();
+  const { telegram } = makeFakeTelegram({ fileBytes: new Uint8Array([1]) });
+  let called = false;
+  const fetchOgPreview = async () => {
+    called = true;
+    return null;
+  };
+
+  await handleUpdate(
+    {
+      message: {
+        chat: { id: 42 },
+        from: { id: 999 },
+        photo: [{ file_id: "a", width: 10, height: 10 }],
+      },
+    },
+    { db, telegram, fetchOgPreview },
+  );
+
+  assert.equal(called, false);
+});
+
+test("spec004 criterion 4: omitting fetchOgPreview entirely still saves the link (back-compat)", async () => {
+  const { db, calls } = makeFakeDb();
+  const { telegram, sentMessages } = makeFakeTelegram();
+
+  const result = await handleUpdate(
+    { message: { chat: { id: 42 }, from: { id: 999 }, text: "https://example.com/no-fetcher" } },
+    { db, telegram },
+  );
+
+  assert.equal(result.action, "item_saved");
+  assert.equal(sentMessages[0].text, "Guardado.");
+  assert.equal(calls.updateItemPreview.length, 0);
+});
+
 // Criterion 6: the objective-selection code path is gone from the live capture flow — no
 // `newobj:`/`obj:` callback handling and no `awaiting_objective_name` left wired.
 test("criterion 6: no objective-selection buttons are ever sent for a link or a photo", async () => {

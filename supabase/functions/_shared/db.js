@@ -57,6 +57,16 @@ export function makeDb({ url, key }) {
       return patch(`items?id=eq.${itemId}`, { status });
     },
 
+    // Spec 004 criterion 4: writes the fetched Open Graph preview fields onto an item. Called at
+    // most once per link item, right after capture — see _shared/webhook-handler.js.
+    async updateItemPreview(itemId, { title = null, description = null, image = null } = {}) {
+      return patch(`items?id=eq.${itemId}`, {
+        preview_title: title,
+        preview_description: description,
+        preview_image_url: image,
+      });
+    },
+
     // Criterion 2: upload the downloaded photo bytes to the private `item-images` bucket.
     async uploadImage(path, bytes, contentType) {
       const res = await fetch(`${storageBase}/object/${IMAGE_BUCKET}/${path}`, {

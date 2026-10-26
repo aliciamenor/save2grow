@@ -1,73 +1,323 @@
-/* Spec 003 — minimal styling. Delegated decision: legible and usable, no design system; this is
-   explicitly not a polish pass (that comes once this moves to Vercel). */
+/* Spec 004 — GAPING design system tokens (criterion 6), inlined in
+   specs/done/004-feed-ux-and-gaping-styling.md and reproduced here as CSS custom properties.
+   Light theme only (closed decision, Gate 1, 2026-10-26) — dark theme is out of scope.
+   No red/danger token exists in GAPING; "Borrar" stays ink-muted, never an invented red. */
 
-body {
-  font-family: system-ui, sans-serif;
-  max-width: 640px;
-  margin: 2rem auto;
-  padding: 0 1rem;
-  color: #1a1a1a;
+:root {
+  /* Colors */
+  --surface: #f9fafb;
+  --surface-card: #ffffff;
+  --border: #e5e7eb;
+  --ink: #1f2937;
+  --ink-body: #4b5563;
+  --ink-muted: #6b7280;
+  --brand: #42767f;
+  --brand-deep: #2f5860;
+  --eje-impacto: #10b981;
+  --brand-tint: rgba(66, 118, 127, 0.08);
+
+  /* Typography */
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+
+  /* Spacing */
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Radius */
+  --radius-lg: 12px;
+  --radius-sm: 8px;
+
+  /* Shadow */
+  --shadow-card: 0 4px 12px -2px rgba(31, 41, 55, 0.08);
+  --shadow-card-hover: 0 12px 32px -8px rgba(31, 41, 55, 0.16);
 }
 
-h1 {
-  font-size: 1.25rem;
-}
-
-#login-section input {
-  font-size: 1rem;
-  padding: 0.5rem;
-  width: 100%;
-  max-width: 320px;
+* {
   box-sizing: border-box;
 }
 
-#login-section button {
-  font-size: 1rem;
-  padding: 0.5rem 1rem;
-  margin-top: 0.5rem;
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink-body);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.65;
+  font-weight: 400;
+}
+
+.page-header {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4) var(--space-4);
+}
+
+h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.2;
+  color: var(--ink);
+  margin: 0;
+}
+
+#login-section {
+  max-width: 320px;
+  margin: var(--space-8) auto;
+  padding: 0 var(--space-4);
+}
+
+#login-section label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-bottom: 4px;
+}
+
+#login-section input {
+  font-family: var(--font-body);
+  font-size: 16px;
+  padding: 10px 12px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+}
+
+#login-section input:focus {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+#login-section button[type="submit"] {
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 500;
+  padding: 10px 16px;
+  margin-top: var(--space-4);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--brand);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+#login-section button[type="submit"]:hover {
+  background: var(--brand-deep);
 }
 
 #login-message {
-  margin-top: 0.75rem;
-  font-size: 0.95rem;
+  margin-top: var(--space-4);
+  font-size: 13px;
+  color: var(--ink-muted);
 }
 
-#feed-list {
-  list-style: none;
+/* --- Feed shell -------------------------------------------------------------------------- */
+
+#feed-section {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0 var(--space-4) var(--space-8);
+}
+
+.feed-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  cursor: pointer;
   padding: 0;
 }
 
-.feed-item {
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 0.75rem;
-  margin-bottom: 0.75rem;
+.link-button:hover {
+  color: var(--ink);
 }
 
-.feed-item img {
-  max-width: 100%;
+/* --- Tabs (criterion 2) ------------------------------------------------------------------ */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tab-button {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.tab-button:hover {
+  color: var(--ink);
+}
+
+.tab-button[aria-selected="true"] {
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+
+/* --- Card feed (criterion 5, Instagram-post-like shape) ---------------------------------- */
+
+.feed-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-4) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.card {
+  background: var(--surface-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  transition: box-shadow 0.15s ease;
+}
+
+.card:hover {
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* The visual fills the top of the card edge-to-edge, whatever its content kind. */
+.card-visual {
+  width: 100%;
+  aspect-ratio: 16 / 9;
   display: block;
-  margin-bottom: 0.5rem;
-  border-radius: 4px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 
-.feed-item a {
+.card-visual img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.card-visual.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-visual.placeholder svg {
+  width: 40px;
+  height: 40px;
+  color: var(--ink-muted);
+}
+
+.card-body {
+  padding: var(--space-6) var(--space-4) var(--space-4);
+}
+
+.card-heading {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1.25;
+  color: var(--ink);
+  margin: 0 0 4px;
+}
+
+.card-text {
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--ink-body);
+  margin: 0;
+}
+
+.card-text.card-link {
   word-break: break-all;
+  color: var(--brand);
+  text-decoration: none;
 }
 
-.status {
-  display: inline-block;
-  font-size: 0.85rem;
-  color: #555;
-  margin: 0.4rem 0;
+.card-text.card-link:hover {
+  text-decoration: underline;
 }
 
-.actions button {
-  margin-right: 0.4rem;
-  font-size: 0.9rem;
-  padding: 0.3rem 0.6rem;
+.card-timestamp {
+  display: block;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-top: 8px;
 }
 
-#logout-button {
-  margin-bottom: 1rem;
+/* --- Icon action row (criterion 6) -------------------------------------------------------- */
+
+.card-actions {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  color: var(--ink-muted);
+}
+
+.icon-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-button:hover,
+.icon-button:focus-visible {
+  background: var(--surface);
+}
+
+/* "Borrar" — no red/danger token exists in GAPING (criterion 6): stays the same neutral weight
+   as the other two icons, nothing invented. */
+.icon-button.icon-delete {
+  color: var(--ink-muted);
+}
+
+/* "Guardar como recurso" — eje-impacto, the closest semantic fit to a positive/confirm color. */
+.icon-button.icon-resource {
+  color: var(--eje-impacto);
+}
+
+/* "Pendiente" (also the restore action from Borrados) — brand teal. */
+.icon-button.icon-pending {
+  color: var(--brand);
+}
+
+.empty-state {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--ink-muted);
+  text-align: center;
+  padding: var(--space-8) 0;
 }

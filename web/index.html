@@ -4,24 +4,37 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>save2grow</title>
+    <!-- GAPING typography (spec 004, criterion 6): Space Grotesk for headings, Inter for body,
+         loaded from Google Fonts — no npm dependency. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Inter:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="css/style.css" />
   </head>
   <body id="app">
-    <h1>save2grow</h1>
+    <header class="page-header">
+      <h1>save2grow</h1>
+    </header>
 
     <section id="login-section">
       <form id="login-form">
-        <label for="email-input">Email</label><br />
+        <label for="email-input">Email</label>
         <input id="email-input" type="email" required autocomplete="email" />
-        <br />
         <button type="submit">Enviar enlace</button>
       </form>
       <p id="login-message"></p>
     </section>
 
     <section id="feed-section" hidden>
-      <button id="logout-button" type="button">Cerrar sesión</button>
-      <ul id="feed-list"></ul>
+      <div class="feed-topbar">
+        <nav id="tabs" class="tabs" aria-label="Filtrar por estado"></nav>
+        <button id="logout-button" type="button" class="link-button">Cerrar sesión</button>
+      </div>
+      <ul id="feed-list" class="feed-list"></ul>
+      <p id="empty-state" class="empty-state" hidden>Nada por aquí todavía.</p>
     </section>
 
     <!-- Supabase's JS client from a CDN, not bundled — zero npm dependencies, same pattern as

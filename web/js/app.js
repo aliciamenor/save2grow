@@ -1,8 +1,20 @@
-// Spec 003 — DOM wiring only. All data/triage logic lives in feed.js (unit tested); this file
-// only reads the form, calls feed.js, and writes the DOM — same split as index.ts vs
-// _shared/*.js in the Telegram bot, so it is not unit tested, same as that wiring layer.
+// Spec 004 — DOM wiring only. All data/triage/card logic lives in feed.js (unit tested); this
+// file reads the form, calls feed.js, and writes the DOM — same split as index.ts vs
+// _shared/*.js in the Telegram bot (decisions.md, 2026-10-26), so it is not unit tested, same as
+// that wiring layer. The one exception is the triage-visibility decision (criterion 1), which
+// is extracted into feed.js's `remainsInTab` precisely so it can be tested without a DOM — see
+// tests/web-feed.test.js.
 import { SUPABASE_URL, SUPABASE_ANON_KEY, REDIRECT_URL } from "./config.js";
-import { fetchFeed, triageItem, applyTriageResult } from "./feed.js";
+import {
+  fetchFeed,
+  triageItem,
+  applyTriageResult,
+  remainsInTab,
+  filterByTab,
+  countsByTab,
+  buildCard,
+  TABS,
+} from "./feed.js";
 
 // `supabase` is the global the CDN UMD bundle attaches to `window` (loaded via <script> in
 // index.html) — no bundler, no npm install, per this repo's zero-dependency pattern.
@@ -13,9 +25,12 @@ const feedSection = document.getElementById("feed-section");
 const loginForm = document.getElementById("login-form");
 const loginMessage = document.getElementById("login-message");
 const feedList = document.getElementById("feed-list");
+const emptyState = document.getElementById("empty-state");
+const tabsNav = document.getElementById("tabs");
 const logoutButton = document.getElementById("logout-button");
 
 let viewModels = [];
+let activeTab = "pendientes"; // criterion 2: Pendientes is the default tab.
 
 function showLoggedOut() {
   loginSection.hidden = false;
@@ -27,62 +42,136 @@ function showLoggedIn() {
   feedSection.hidden = false;
 }
 
-const STATUS_LABEL = {
-  pending: "Pendiente",
-  resource: "Recurso",
-  deleted: "Borrado",
+// --- Icons (criterion 6) — simple inline SVG line icons, consistent stroke width, no icon
+// library dependency (delegated decision). Each action's accessible name is the Spanish verb
+// phrase it performs, since icon-only buttons still need one.
+
+const ICONS = {
+  delete: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/><path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`,
+  resource: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5s-7.5-4.6-9.8-9.1C.7 8 2 4.8 5 3.8c2-.6 4 .1 5.2 1.8l1.8 2.4 1.8-2.4C15 3.9 17 3.2 19 3.8c3 1 4.3 4.2 2.8 7.6-2.3 4.5-9.8 9.1-9.8 9.1z"/></svg>`,
+  pending: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>`,
 };
 
-function renderFeed() {
-  feedList.innerHTML = "";
-  for (const vm of viewModels) {
-    const li = document.createElement("li");
-    li.dataset.itemId = String(vm.id);
-    li.className = "feed-item";
+const PLACEHOLDER_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 15l-5-5-6 6-3-3-3 3"/></svg>`;
 
-    const contentEl =
-      vm.kind === "image"
-        ? Object.assign(document.createElement("img"), { src: vm.content, alt: "imagen guardada" })
-        : Object.assign(document.createElement("a"), {
-            href: vm.content,
-            textContent: vm.content,
-            target: "_blank",
-            rel: "noopener noreferrer",
-          });
-    li.appendChild(contentEl);
+const DECISION_BY_ICON = [
+  { decision: "delete", icon: "delete", label: "Borrar", className: "icon-delete" },
+  { decision: "resource", icon: "resource", label: "Guardar como recurso", className: "icon-resource" },
+  { decision: "pending", icon: "pending", label: "Pendiente", className: "icon-pending" },
+];
 
-    const statusEl = document.createElement("span");
-    statusEl.className = "status";
-    statusEl.textContent = STATUS_LABEL[vm.status] || vm.status;
-    li.appendChild(statusEl);
+// --- Tabs (criterion 2) ---------------------------------------------------------------------
 
-    const actions = document.createElement("div");
-    actions.className = "actions";
-    for (const [decision, label] of [
-      ["delete", "Borrar"],
-      ["resource", "Guardar como recurso"],
-      ["pending", "Pendiente"],
-    ]) {
-      const button = document.createElement("button");
-      button.textContent = label;
-      button.addEventListener("click", () => onTriage(vm.id, decision, statusEl));
-      actions.appendChild(button);
-    }
-    li.appendChild(actions);
-
-    feedList.appendChild(li);
+function renderTabs() {
+  const counts = countsByTab(viewModels);
+  tabsNav.innerHTML = "";
+  for (const tab of TABS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tab-button";
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", String(tab.key === activeTab));
+    const count = counts[tab.key] || 0;
+    button.textContent = tab.key === "pendientes" ? `${tab.label} (${count})` : tab.label;
+    button.addEventListener("click", () => {
+      activeTab = tab.key;
+      renderTabs();
+      renderFeed();
+    });
+    tabsNav.appendChild(button);
   }
 }
 
-async function onTriage(itemId, decision, statusEl) {
+// --- Cards (criteria 4, 5, 6) ----------------------------------------------------------------
+
+function buildVisualEl(visual) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "card-visual";
+  if (visual.type === "image") {
+    wrapper.appendChild(Object.assign(document.createElement("img"), { src: visual.src, alt: "" }));
+  } else {
+    wrapper.classList.add("placeholder");
+    wrapper.innerHTML = PLACEHOLDER_SVG;
+  }
+  return wrapper;
+}
+
+function buildCardEl(vm) {
+  const card = buildCard(vm);
+
+  const li = document.createElement("li");
+  li.dataset.itemId = String(vm.id);
+  li.className = "card";
+
+  li.appendChild(buildVisualEl(card.visual));
+
+  const body = document.createElement("div");
+  body.className = "card-body";
+
+  if (card.heading) {
+    body.appendChild(Object.assign(document.createElement("p"), { className: "card-heading", textContent: card.heading }));
+  }
+  if (card.body) {
+    if (card.kind === "link-plain") {
+      body.appendChild(
+        Object.assign(document.createElement("a"), {
+          className: "card-text card-link",
+          href: card.href,
+          textContent: card.body,
+          target: "_blank",
+          rel: "noopener noreferrer",
+        }),
+      );
+    } else {
+      body.appendChild(Object.assign(document.createElement("p"), { className: "card-text", textContent: card.body }));
+    }
+  }
+  body.appendChild(Object.assign(document.createElement("span"), { className: "card-timestamp", textContent: card.timestamp }));
+  li.appendChild(body);
+
+  const actions = document.createElement("div");
+  actions.className = "card-actions";
+  for (const { decision, icon, label, className } of DECISION_BY_ICON) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `icon-button ${className}`;
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.innerHTML = ICONS[icon];
+    button.addEventListener("click", () => onTriage(vm.id, decision, li));
+    actions.appendChild(button);
+  }
+  li.appendChild(actions);
+
+  return li;
+}
+
+function renderFeed() {
+  feedList.innerHTML = "";
+  const visible = filterByTab(viewModels, activeTab);
+  emptyState.hidden = visible.length > 0;
+  for (const vm of visible) {
+    feedList.appendChild(buildCardEl(vm));
+  }
+}
+
+// Criterion 1: triage moves an item between tabs, no page reload, the same code path from any
+// tab (including the Borrados → Pendiente restore case). `remainsInTab` (feed.js, unit tested)
+// is the only decision made here; this function's own DOM removal is deliberately left
+// untested, same convention as the rest of this file.
+async function onTriage(itemId, decision, li) {
   const newStatus = await triageItem(client, itemId, decision);
   viewModels = applyTriageResult(viewModels, itemId, newStatus);
-  // Patch just this item's status text — no full re-render, no page reload (criterion 5).
-  statusEl.textContent = STATUS_LABEL[newStatus] || newStatus;
+  renderTabs();
+  if (!remainsInTab(newStatus, activeTab)) {
+    li.remove();
+    if (filterByTab(viewModels, activeTab).length === 0) emptyState.hidden = false;
+  }
 }
 
 async function loadFeed() {
   viewModels = await fetchFeed(client);
+  renderTabs();
   renderFeed();
 }
 
@@ -98,7 +187,7 @@ loginForm.addEventListener("submit", async (event) => {
     if (error) throw error;
     loginMessage.textContent = "Revisa tu email.";
   } catch {
-    // Criterion 2: no stack traces, no raw API responses shown to the user.
+    // Criterion 2 (spec 003): no stack traces, no raw API responses shown to the user.
     loginMessage.textContent = "No se pudo enviar el enlace. Inténtalo de nuevo.";
   }
 });
@@ -116,8 +205,8 @@ client.auth.onAuthStateChange((_event, session) => {
   }
 });
 
-// Criterion 3: session persists across reload — getSession() reads the client's own local
-// storage, restoring it without a fresh login.
+// Criterion 3 (spec 003): session persists across reload — getSession() reads the client's own
+// local storage, restoring it without a fresh login.
 client.auth.getSession().then(({ data }) => {
   if (data.session) {
     showLoggedIn();
